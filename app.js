@@ -37,9 +37,9 @@
   }
 
   async function api(path, options = {}) {
-    if (!API_BASE) {
+    if (!API_BASE || API_BASE.includes("YOUR-API-HOST")) {
       throw new Error(
-        'API не настроен. Укажи window.MEOW_API_BASE = "https://твой-api.ru" в index.html'
+        'API не настроен. В index.html укажи URL сервера с api.py, например https://api.example.com'
       );
     }
     const initData = getInitData();
@@ -49,14 +49,22 @@
       );
     }
 
-    const res = await fetch(API_BASE + path, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        "X-Telegram-Init-Data": initData,
-        ...(options.headers || {}),
-      },
-    });
+    const url = API_BASE + path;
+    let res;
+    try {
+      res = await fetch(url, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Telegram-Init-Data": initData,
+          ...(options.headers || {}),
+        },
+      });
+    } catch (netErr) {
+      throw new Error(
+        "Сеть: не удалось связаться с API (" + url + "). Проверь HTTPS и CORS."
+      );
+    }
 
     let data = null;
     try {
@@ -64,8 +72,13 @@
     } catch (_) {}
 
     if (!res.ok) {
+      if (res.status === 404) {
+        throw new Error(
+          "404 на " + url + " — это не сервер api.py. MEOW_API_BASE должен указывать на хост, где крутится uvicorn api:app, а не на Vercel/GitHub Pages."
+        );
+      }
       const msg =
-        (data && (data.detail || data.message)) || `Ошибка ${res.status}`;
+        (data && (data.detail || data.message)) || ("Ошибка " + res.status);
       throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
     }
     return data;
@@ -236,10 +249,18 @@
     grid.innerHTML = items
       .map((c) => {
         const emoji = rarityEmoji(c.rarity);
+        // Всегда пробуем URL фото с API (даже если has_photo=false — вдруг файл есть)
+        const photoSrc =
+          API_BASE && c.id
+            ? API_BASE + (c.photo_url || `/api/card/${c.id}/photo`)
+            : null;
+        const img = photoSrc
+            ? `<img class="card-img" src="${escAttr(photoSrc)}" alt="" loading="lazy" onerror="this.style.display='none';var e=this.nextElementSibling;if(e)e.style.display='inline'" /><span class="card-emoji" style="display:none">${emoji}</span>`
+            : `<span class="card-emoji">${emoji}</span>`;
         return `
         <div class="card-item" data-id="${c.id}">
           <div class="card-thumb">
-            <span class="card-emoji">${emoji}</span>
+            ${img}
             <div class="card-rarity-bar ${c.rarity}"></div>
             ${c.amount > 1 ? `<div class="card-amount">×${c.amount}</div>` : ""}
           </div>
@@ -333,8 +354,16 @@
   }
 
   function showModal(card) {
-    document.getElementById("modalPhoto").innerHTML =
-      `<span class="card-emoji-lg">${rarityEmoji(card.rarity)}</span>`;
+    const modalPhoto = document.getElementById("modalPhoto");
+    const photoSrc =
+      API_BASE && card.id
+        ? API_BASE + (card.photo_url || `/api/card/${card.id}/photo`)
+        : null;
+    if (photoSrc) {
+      modalPhoto.innerHTML = `<img src="${escAttr(photoSrc)}" alt="" onerror="this.parentNode.innerHTML='<span class=\'card-emoji-lg\'>${rarityEmoji(card.rarity)}</span>'" />`;
+    } else {
+      modalPhoto.innerHTML = `<span class="card-emoji-lg">${rarityEmoji(card.rarity)}</span>`;
+    }
     document.getElementById("modalName").textContent = card.name;
     document.getElementById("modalRarity").innerHTML =
       `${card.rarity_icon || ""} ${card.rarity_name || card.rarity}`;
