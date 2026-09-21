@@ -1,202 +1,147 @@
-# 🃏 Мряу Mini App
+# Мряу Mini App — реальные данные из БД бота
 
-Красивая Telegram Mini App для карточной игры **Мряу**.  
-Работает как Web App внутри Telegram и как обычный сайт (демо-режим).
+Мини-аппка читает профиль, коллекцию, топ и маркет из той же SQLite, что и бот.
 
----
-
-## Что умеет
-
-- **Профиль** — ник, баланс монет/кристаллов, стрик, статистика
-- **Коллекция** — карточки по редкостям, фильтры, просмотр
-- **Маркет** — просмотр цен, обмен монет → кристаллы
-- **Топ** — рейтинг по монетам / карточкам / стрику
-- **Помощь** — краткая справка по игре
-- **Действия** — получить карточку (с кулдауном), бросить кубик
-
-Данные в демо-режиме хранятся в `localStorage`.  
-При открытии из Telegram подхватывается имя и аватар пользователя.
+```
+Telegram → Mini App (HTML на Vercel / GitHub Pages)
+                ↓ HTTPS + initData
+         api.py (FastAPI на VPS рядом с ботом)
+                ↓
+         cards_game.db
+```
 
 ---
 
-## Быстрый старт (локально)
+## 1. Запуск API (на сервере бота)
 
 ```bash
+pip install fastapi uvicorn aiosqlite
+
+export BOT_TOKEN="123456:ABC..."              # токен бота (проверка подписи)
+export DB_NAME="/app/data/cards_game.db"      # путь к БД бота
+export CORS_ORIGINS="https://твой-фронт.vercel.app,https://web.telegram.org"
+export API_PORT=8080
+
 cd meow-miniapp
-# любой статический сервер, например:
-npx serve .
-# или
-python -m http.server 8080
+uvicorn api:app --host 0.0.0.0 --port 8080
 ```
 
-Открой `http://localhost:8080` в браузере.
+Проверка: `curl http://127.0.0.1:8080/health`
+
+API снаружи должен быть по **HTTPS** (Nginx + Let's Encrypt или Cloudflare Tunnel).
+
+### Nginx (фрагмент)
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name api.example.com;
+    ssl_certificate     /etc/letsencrypt/live/api.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
 
 ---
 
-## Размещение на Vercel (рекомендуется)
+## 2. Фронтенд
 
-1. Установи [Vercel CLI](https://vercel.com/docs/cli) или используй веб-интерфейс.
+В `index.html` укажи URL API:
 
-2. **Через сайт:**
-   - Зайди на [vercel.com](https://vercel.com) → **Add New Project**
-   - Импортируй репозиторий с этой папкой **или** загрузи файлы через drag-and-drop (Deploy)
-   - Framework Preset: **Other**
-   - Root Directory: папка с `index.html` (если в корне — оставь пустым)
-   - Deploy
+```html
+<script>
+  window.MEOW_API_BASE = "https://api.example.com";
+</script>
+```
 
-3. **Через CLI:**
-   ```bash
-   npm i -g vercel
-   cd meow-miniapp
-   vercel
-   ```
-   Следуй подсказкам. Получишь URL вида `https://meow-miniapp.vercel.app`
+Залей папку на Vercel или GitHub Pages (только статика).
 
-4. В BotFather:
-   ```
-   /mybots → твой бот → Bot Settings → Menu Button
-   → Configure menu button → укажи URL мини-аппки
-   ```
-   Или добавь кнопку Web App в боте (см. ниже).
+**Vercel:** New Project → загрузить папку → Framework Other → Deploy.
+
+**GitHub Pages:** push в репозиторий → Settings → Pages → branch main / root.
 
 ---
 
-## Размещение на GitHub Pages
-
-1. Создай репозиторий на GitHub (например `meow-miniapp`).
-
-2. Залей файлы:
-   ```bash
-   cd meow-miniapp
-   git init
-   git add .
-   git commit -m "Мряу Mini App"
-   git branch -M main
-   git remote add origin https://github.com/ТВОЙ_ЮЗЕР/meow-miniapp.git
-   git push -u origin main
-   ```
-
-3. В репозитории: **Settings → Pages**
-   - Source: **Deploy from a branch**
-   - Branch: `main` / folder: `/ (root)`
-   - Save
-
-4. Сайт будет доступен по адресу:
-   `https://ТВОЙ_ЮЗЕР.github.io/meow-miniapp/`
-
-5. Этот URL укажи в BotFather как Menu Button / Web App URL.
-
-> ⚠️ GitHub Pages иногда отдаёт страницу с задержкой 1–2 минуты после пуша.
-
----
-
-## Подключение к боту (aiogram)
-
-### 1. Menu Button (кнопка слева внизу в чате с ботом)
-
-В BotFather:
-```
-/mybots → выбери бота → Bot Settings → Menu Button
-→ Configure menu button
-→ Web App URL: https://твой-домен.vercel.app
-→ Title: 🃏 Мряу
-```
-
-### 2. Inline-кнопка Web App в сообщении
-
-Добавь в бота (пример для aiogram 3):
+## 3. Кнопка в боте (aiogram 3)
 
 ```python
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 
-WEBAPP_URL = "https://твой-домен.vercel.app"  # ← твой URL
+WEBAPP_URL = "https://meow-xxx.vercel.app"
 
-def get_webapp_kb() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
+def webapp_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
             text="🃏 Открыть мини-аппку",
             web_app=WebAppInfo(url=WEBAPP_URL),
-        )]
-    ])
+        )
+    ]])
 
-# В /start или в профиле:
+# в /start:
 await message.answer(
-    "Открой мини-аппку для удобного просмотра коллекции:",
-    reply_markup=get_webapp_kb(),
+    "Открой мини-аппку — коллекция и топ:",
+    reply_markup=webapp_kb(),
 )
 ```
 
-### 3. Reply-кнопка (клавиатура)
+Или Menu Button в BotFather → Bot Settings → Menu Button → URL фронта.
 
-```python
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+---
 
-kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="🃏 Мини-аппка", web_app=WebAppInfo(url=WEBAPP_URL))],
-        # ... остальные кнопки
-    ],
-    resize_keyboard=True,
-)
+## API
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/health` | Проверка |
+| GET | `/api/me` | Профиль |
+| GET | `/api/collection` | Коллекция |
+| GET | `/api/top?kind=coins\|cards\|streak` | Топ-10 |
+| GET | `/api/market` | Маркет |
+| POST | `/api/market/exchange` | `{"amount":5}` — обмен 🪙→💎 |
+| POST | `/api/market/buy` | `{"card_id":12}` |
+| GET | `/api/card/{id}` | Одна карточка |
+
+Заголовок для всех `/api/*`:
+```
+X-Telegram-Init-Data: <значение tg.initData>
 ```
 
 ---
 
-## Как сделать «живые» данные (API)
+## Что видно в аппке
 
-Сейчас мини-аппка работает в **демо-режиме** (localStorage).  
-Чтобы показывать реальные карточки/баланс из SQLite бота:
+- Профиль: ник, роль, пол, монеты, кристаллы, стрик, кулдаун
+- Коллекция: карточки из inventory, фильтры по редкости
+- Маркет: недостающие по редкостям, обмен монет на кристаллы
+- Топ: из users / inventory
+- Получение карточки и кубик — в чате бота («мряу»)
 
-1. Подними простой API (FastAPI / aiohttp) рядом с ботом, который:
-   - принимает `initData` от Telegram WebApp
-   - проверяет подпись (`HMAC-SHA256` с bot token)
-   - возвращает JSON: `{ coins, gems, streak, inventory, cards... }`
-
-2. В `app.js` замени загрузку state на `fetch('/api/me', { headers: { 'X-Telegram-Init-Data': tg.initData } })`.
-
-3. Хостинг API: тот же Vercel (serverless functions) или VPS, где крутится бот.
-
-Пример минимальной проверки `initData` (Python):
-
-```python
-import hmac, hashlib, urllib.parse
-
-def check_webapp_init_data(init_data: str, bot_token: str) -> dict | None:
-    parsed = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
-    received_hash = parsed.pop("hash", None)
-    if not received_hash:
-        return None
-    data_check = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
-    secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-    calc = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(calc, received_hash):
-        return None
-    # parsed["user"] — JSON-строка с id, first_name и т.д.
-    return parsed
-```
+Фото карточек в БД — Telegram file_id; в UI показываются эмодзи по редкости (без отдельного прокси файлов).
 
 ---
 
-## Структура файлов
+## Файлы
 
 ```
 meow-miniapp/
-├── index.html    # разметка
-├── styles.css    # тёмная тема, адаптив под Telegram
-├── app.js        # логика, демо-данные, Telegram WebApp API
-└── README.md     # эта инструкция
+├── index.html   # UI + MEOW_API_BASE
+├── styles.css
+├── app.js       # запросы с initData
+├── api.py       # FastAPI → SQLite
+├── vercel.json
+└── README.md
 ```
 
-Никаких зависимостей — чистый HTML/CSS/JS.  
-Работает на любом статическом хостинге.
+## Проблемы
 
----
-
-## Советы
-
-- URL мини-аппки должен быть **HTTPS** (обязательно для Telegram).
-- После деплоя проверь, что открывается внутри Telegram (не только в браузере).
-- Для теста в браузере — просто открой сайт: будет демо-режим с моковыми данными.
-- Haptic Feedback и тема Telegram подхватываются автоматически при запуске из клиента.
-
-Удачи с карточками 🐱🃏
+| Симптом | Что сделать |
+|---------|-------------|
+| API не настроен | Задать `window.MEOW_API_BASE` |
+| Открой из Telegram | Жмать кнопку Web App в боте |
+| 401 подпись | BOT_TOKEN API = токен того же бота |
+| CORS | Добавить домен фронта в CORS_ORIGINS |
+| Нет HTTPS у API | Telegram не пустит запросы |
