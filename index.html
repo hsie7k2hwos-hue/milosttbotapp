@@ -12,11 +12,24 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- Full-screen error / offline overlay -->
+  <div id="fatalOverlay" class="fatal-overlay hidden" aria-live="assertive">
+    <div class="fatal-card">
+      <div class="fatal-icon" id="fatalIcon">⚠️</div>
+      <h2 id="fatalTitle">Нет связи с сервером</h2>
+      <p id="fatalMessage">Не удалось загрузить данные. Проверьте интернет и настройки API.</p>
+      <ol id="fatalSteps" class="fatal-steps"></ol>
+      <button type="button" class="fatal-retry" id="fatalRetry">Повторить</button>
+    </div>
+  </div>
+
   <div id="app">
     <!-- Header -->
     <header class="header">
       <div class="header-left">
-        <div class="avatar" id="userAvatar">🐱</div>
+        <div class="avatar" id="userAvatar">
+          <span class="avatar-fallback">🐱</span>
+        </div>
         <div class="user-info">
           <div class="nickname" id="userNickname">Загрузка…</div>
           <div class="user-id" id="userId">—</div>
@@ -41,7 +54,9 @@
         <div class="profile-card">
           <div class="profile-bg"></div>
           <div class="profile-body">
-            <div class="profile-avatar-large" id="profileAvatar">🐱</div>
+            <div class="profile-avatar-large" id="profileAvatar">
+              <span class="avatar-fallback">🐱</span>
+            </div>
             <h1 class="profile-name" id="profileName">—</h1>
             <div class="profile-role" id="profileRole">👤 Пользователь</div>
             <div class="stats-grid">
@@ -67,27 +82,29 @@
 
         <div class="section-title">Быстрые действия</div>
         <div class="action-grid">
-          <button class="action-btn" data-action="claim">
+          <button type="button" class="action-btn" data-action="claim">
             <span class="action-icon">🃏</span>
             <span class="action-label">Получить карточку</span>
             <span class="action-hint" id="claimHint">Готово</span>
           </button>
-          <button class="action-btn" data-action="dice">
+          <button type="button" class="action-btn" data-action="dice">
             <span class="action-icon">🎲</span>
             <span class="action-label">Кубик</span>
             <span class="action-hint">−10…+10 🪙</span>
           </button>
-          <button class="action-btn" data-action="market">
+          <button type="button" class="action-btn" data-action="market">
             <span class="action-icon">🛒</span>
             <span class="action-label">Маркет</span>
             <span class="action-hint">Купить за 💎</span>
           </button>
-          <button class="action-btn" data-action="top">
+          <button type="button" class="action-btn" data-action="top">
             <span class="action-icon">🏆</span>
             <span class="action-label">Топ</span>
             <span class="action-hint">Рейтинг</span>
           </button>
         </div>
+
+        <div class="pull-hint muted">Двойной тап по шапке — обновить данные</div>
       </section>
 
       <!-- Collection tab -->
@@ -120,12 +137,30 @@
           <p>Покупай недостающие карточки за кристаллы. Курс: <b>1 💎 = 100 🪙</b></p>
         </div>
         <div class="market-list" id="marketList"></div>
-        <div class="exchange-card">
+
+        <!-- Browser for buying a specific missing card -->
+        <div class="market-browser hidden" id="marketBrowser">
+          <div class="section-header">
+            <h3 id="browserTitle">Карточки</h3>
+            <button type="button" class="text-btn" id="browserClose">← Назад</button>
+          </div>
+          <div class="browser-nav">
+            <button type="button" class="nav-arrow" id="browserPrev" aria-label="Предыдущая">‹</button>
+            <span class="browser-page" id="browserPage">1 / 1</span>
+            <button type="button" class="nav-arrow" id="browserNext" aria-label="Следующая">›</button>
+          </div>
+          <div class="browser-card" id="browserCard">
+            <div class="empty-state"><p>Загрузка…</p></div>
+          </div>
+          <button type="button" class="buy-btn" id="browserBuy" disabled>Купить</button>
+        </div>
+
+        <div class="exchange-card" id="exchangeCard">
           <h3>💱 Обмен монет → кристаллы</h3>
           <div class="exchange-row">
-            <button class="ex-btn" data-amount="1">+1 💎 · 100 🪙</button>
-            <button class="ex-btn" data-amount="5">+5 💎 · 500 🪙</button>
-            <button class="ex-btn" data-amount="10">+10 💎 · 1 000 🪙</button>
+            <button type="button" class="ex-btn" data-amount="1">+1 💎 · 100 🪙</button>
+            <button type="button" class="ex-btn" data-amount="5">+5 💎 · 500 🪙</button>
+            <button type="button" class="ex-btn" data-amount="10">+10 💎 · 1 000 🪙</button>
           </div>
         </div>
       </section>
@@ -136,12 +171,27 @@
           <h2>Топ игроков</h2>
         </div>
         <div class="top-tabs">
-          <button class="top-tab active" data-kind="coins">🪙 Монеты</button>
-          <button class="top-tab" data-kind="cards">🃏 Карты</button>
-          <button class="top-tab" data-kind="streak">🔥 Стрик</button>
+          <button type="button" class="top-tab active" data-kind="coins">🪙 Монеты</button>
+          <button type="button" class="top-tab" data-kind="cards">🃏 Карты</button>
+          <button type="button" class="top-tab" data-kind="streak">🔥 Стрик</button>
         </div>
         <div class="top-list" id="topList"></div>
         <div class="my-rank" id="myRank"></div>
+      </section>
+
+      <!-- Admin tab (only for admin / superadmin) -->
+      <section class="tab-panel" data-tab="admin">
+        <div class="section-header">
+          <h2>Админ</h2>
+          <button type="button" class="text-btn" id="adminRefresh">Обновить</button>
+        </div>
+        <div class="admin-stats" id="adminStats">
+          <div class="empty-state"><p>Загрузка…</p></div>
+        </div>
+        <div class="section-title">Последние получения</div>
+        <div class="admin-log" id="adminLog">
+          <div class="empty-state"><p>Нет данных</p></div>
+        </div>
       </section>
 
       <!-- Help tab -->
@@ -149,57 +199,66 @@
         <div class="help-content">
           <div class="help-block">
             <h3>🃏 Получить карточку</h3>
-            <p>Напиши <b>«мряу»</b> в чате с ботом или нажми кнопку. Бесплатно раз в 4 часа. Можно ускорить за монеты.</p>
+            <p>Напиши <b>«мряу»</b> в чате с ботом или нажми кнопку. Бесплатно раз в 4 часа. Можно ускорить за монеты в боте.</p>
           </div>
           <div class="help-block">
             <h3>🔥 Стрик</h3>
-            <p>Заходи каждый день — стрик растёт, бонусные монеты увеличиваются. Пропуск 24 часов сбрасывает стрик.</p>
+            <p>Заходи каждый день — стрик растёт, бонусные монеты увеличиваются. Пропуск 24 часов сбрасывает стрик. На 7 и 30 дней — бонус 💎.</p>
           </div>
           <div class="help-block">
             <h3>💎 Кристаллы</h3>
-            <p>За новые мифические (+1) и легендарные (+2) карточки. Также за стрик 7 и 30 дней. В маркете покупаешь недостающие карты.</p>
+            <p>За новые мифические (+1) и легендарные (+2) карточки. Также за стрик 7 и 30 дней. В маркете покупаешь недостающие карты. Обмен: 100 🪙 = 1 💎.</p>
           </div>
           <div class="help-block">
             <h3>🎲 Кубик</h3>
             <p>«мряу кубик» — раз в 10 минут, нужно минимум 10 🪙. Выпадает от −10 до +10 монет.</p>
           </div>
           <div class="help-block">
+            <h3>🛒 Маркет</h3>
+            <p>Открой редкость → листай недостающие карточки → купи за 💎. Цена зависит от редкости. Уже собранные не показываются.</p>
+          </div>
+          <div class="help-block">
             <h3>Редкости</h3>
             <div class="rarity-legend">
-              <div><span class="dot common"></span> Обычная · 10 🪙</div>
-              <div><span class="dot rare"></span> Редкая · 25 🪙</div>
-              <div><span class="dot epic"></span> Эпическая · 50 🪙</div>
-              <div><span class="dot mythical"></span> Мифическая · 75 🪙 +1 💎</div>
-              <div><span class="dot legendary"></span> Легендарная · 100 🪙 +2 💎</div>
+              <div><span class="dot common"></span> Обычная · 10 🪙 · 1 💎 в маркете</div>
+              <div><span class="dot rare"></span> Редкая · 25 🪙 · 3 💎</div>
+              <div><span class="dot epic"></span> Эпическая · 50 🪙 · 8 💎</div>
+              <div><span class="dot mythical"></span> Мифическая · 75 🪙 +1 💎 · 20 💎</div>
+              <div><span class="dot legendary"></span> Легендарная · 100 🪙 +2 💎 · 50 💎</div>
             </div>
           </div>
-          <p class="help-footer">Все действия выполняются в чате с ботом. Эта мини-аппка — удобный обзор твоего прогресса.</p>
+          <div class="help-block">
+            <h3>Мини-аппка</h3>
+            <p>Обзор профиля, коллекции, маркета и топа. Получение карточек и кубик — только в чате с ботом. Двойной тап по шапке обновляет данные.</p>
+          </div>
+          <p class="help-footer">Все игровые действия выполняются в чате с ботом. Эта мини-аппка — удобный обзор твоего прогресса.</p>
         </div>
       </section>
     </main>
 
     <!-- Bottom navigation -->
-    <nav class="bottom-nav">
-      <button class="nav-btn active" data-tab="profile">
+    <nav class="bottom-nav" id="bottomNav">
+      <button type="button" class="nav-btn active" data-tab="profile">
         <span class="nav-icon">👤</span>
         <span class="nav-label">Профиль</span>
       </button>
-      <button class="nav-btn" data-tab="collection">
+      <button type="button" class="nav-btn" data-tab="collection">
         <span class="nav-icon">🃏</span>
         <span class="nav-label">Коллекция</span>
       </button>
-      <button class="nav-btn" data-tab="market">
+      <button type="button" class="nav-btn" data-tab="market">
         <span class="nav-icon">🛒</span>
         <span class="nav-label">Маркет</span>
       </button>
-      <button class="nav-btn" data-tab="top">
+      <button type="button" class="nav-btn" data-tab="top">
         <span class="nav-icon">🏆</span>
         <span class="nav-label">Топ</span>
       </button>
-      <button class="nav-btn" data-tab="help">
+      <button type="button" class="nav-btn" data-tab="help">
         <span class="nav-icon">❓</span>
         <span class="nav-label">Помощь</span>
       </button>
+      <!-- Admin nav injected by JS when role is admin/superadmin -->
     </nav>
   </div>
 
@@ -214,19 +273,19 @@
         <div class="modal-rarity" id="modalRarity">—</div>
         <div class="modal-meta" id="modalMeta"></div>
       </div>
-      <button class="modal-close" id="modalClose">Закрыть</button>
+      <button type="button" class="modal-close" id="modalClose">Закрыть</button>
     </div>
   </div>
 
   <!-- Toast -->
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast" role="status"></div>
 
   <!-- ═══ НАСТРОЙКА API ═══
        Укажи URL, где крутится api.py (HTTPS обязателен для Telegram).
-       Пример: https://api.example.com  или  https://твой-vps.ru:8080
+       Пример: https://api.example.com
   -->
   <script>
-    window.MEOW_API_BASE = "https://bot-1788312110-6885-chekinikita.bothost.tech";  // ← ЗАМЕНИ на свой URL API
+    window.MEOW_API_BASE = "https://bot-1788312110-6885-chekinikita.bothost.tech";
   </script>
   <script src="app.js"></script>
 </body>

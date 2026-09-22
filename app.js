@@ -11,10 +11,10 @@
   const API_BASE = (window.MEOW_API_BASE || "").replace(/\/$/, "");
 
   const RARITIES = {
-    common:    { icon: "⚪", name: "Обычная" },
-    rare:      { icon: "🔵", name: "Редкая" },
-    epic:      { icon: "🟣", name: "Эпическая" },
-    mythical:  { icon: "🔴", name: "Мифическая" },
+    common: { icon: "⚪", name: "Обычная" },
+    rare: { icon: "🔵", name: "Редкая" },
+    epic: { icon: "🟣", name: "Эпическая" },
+    mythical: { icon: "🔴", name: "Мифическая" },
     legendary: { icon: "🟡", name: "Легендарная" },
   };
 
@@ -34,6 +34,34 @@
 
   function isTelegram() {
     return !!(tg && tg.initData);
+  }
+
+  function isAdminRole(role) {
+    return role === "admin" || role === "superadmin";
+  }
+
+  // ── Fatal overlay (blocks entire UI) ──
+  function showFatal(title, message, steps) {
+    const overlay = document.getElementById("fatalOverlay");
+    const app = document.getElementById("app");
+    document.getElementById("fatalTitle").textContent = title || "Ошибка";
+    document.getElementById("fatalMessage").textContent = message || "";
+    const ol = document.getElementById("fatalSteps");
+    ol.innerHTML = "";
+    if (steps && steps.length) {
+      steps.forEach((s) => {
+        const li = document.createElement("li");
+        li.innerHTML = s;
+        ol.appendChild(li);
+      });
+    }
+    overlay.classList.remove("hidden");
+    app.classList.add("is-blocked");
+  }
+
+  function hideFatal() {
+    document.getElementById("fatalOverlay").classList.add("hidden");
+    document.getElementById("app").classList.remove("is-blocked");
   }
 
   async function api(path, options = {}) {
@@ -74,7 +102,14 @@
     if (!res.ok) {
       if (res.status === 404) {
         throw new Error(
-          "404 на " + url + " — это не сервер api.py. MEOW_API_BASE должен указывать на хост, где крутится uvicorn api:app, а не на Vercel/GitHub Pages."
+          "404 на " +
+            url +
+            " — это не сервер api.py. MEOW_API_BASE должен указывать на хост, где крутится uvicorn api:app."
+        );
+      }
+      if (res.status === 403) {
+        throw new Error(
+          (data && (data.detail || data.message)) || "Доступ запрещён"
         );
       }
       const msg =
@@ -88,8 +123,13 @@
   let collection = null;
   let market = null;
   let topData = null;
+  let adminData = null;
   let currentFilter = "all";
   let topKind = "coins";
+  let browserRarity = null;
+  let browserPage = 0;
+  let browserData = null;
+  let adminNavInjected = false;
 
   function fmt(n) {
     return Number(n || 0).toLocaleString("ru-RU").replace(/\s/g, "\u00a0");
@@ -135,6 +175,38 @@
     );
   }
 
+  function cardPhotoSrc(card) {
+    if (!API_BASE || !card) return null;
+    if (card.photo_url) {
+      return card.photo_url.startsWith("http")
+        ? card.photo_url
+        : API_BASE + card.photo_url;
+    }
+    if (card.id) return API_BASE + `/api/card/${card.id}/photo`;
+    return null;
+  }
+
+  function setAvatar(el, photoUrl, fallbackEmoji) {
+    if (!el) return;
+    const fallback = fallbackEmoji || "🐱";
+    el.innerHTML = `<span class="avatar-fallback">${fallback}</span>`;
+    el.classList.remove("has-photo");
+    if (!photoUrl) return;
+    const img = document.createElement("img");
+    img.alt = "";
+    img.decoding = "async";
+    img.referrerPolicy = "no-referrer";
+    img.src = photoUrl;
+    img.onload = () => {
+      el.classList.add("has-photo");
+    };
+    img.onerror = () => {
+      el.classList.remove("has-photo");
+      if (img.parentNode) img.remove();
+    };
+    el.appendChild(img);
+  }
+
   // ── Header / Profile ──
   function renderHeader() {
     if (!me) return;
@@ -142,13 +214,7 @@
     document.getElementById("userId").textContent = `ID ${me.user_id}`;
     document.getElementById("coinsValue").textContent = fmt(me.coins);
     document.getElementById("gemsValue").textContent = fmt(me.gems);
-
-    const avatarEl = document.getElementById("userAvatar");
-    if (me.photo_url) {
-      avatarEl.innerHTML = `<img src="${escAttr(me.photo_url)}" alt="" />`;
-    } else {
-      avatarEl.textContent = "🐱";
-    }
+    setAvatar(document.getElementById("userAvatar"), me.photo_url, "🐱");
   }
 
   function renderProfile() {
@@ -160,16 +226,12 @@
     document.getElementById("statDays").textContent = me.days_with_us;
 
     const parts = (me.gender_display || "— Не задан").split(" ");
-    document.querySelector("#genderRow .gender-icon").textContent = parts[0] || "—";
+    document.querySelector("#genderRow .gender-icon").textContent =
+      parts[0] || "—";
     document.querySelector("#genderRow .gender-text").textContent =
       parts.slice(1).join(" ") || "Не задан";
 
-    const profileAvatar = document.getElementById("profileAvatar");
-    if (me.photo_url) {
-      profileAvatar.innerHTML = `<img src="${escAttr(me.photo_url)}" alt="" />`;
-    } else {
-      profileAvatar.textContent = "🐱";
-    }
+    setAvatar(document.getElementById("profileAvatar"), me.photo_url, "🐱");
 
     const hint = document.getElementById("claimHint");
     if (me.can_claim_free) {
@@ -184,6 +246,20 @@
     }
   }
 
+  function ensureAdminNav() {
+    if (!me || !isAdminRole(me.role) || adminNavInjected) return;
+    const nav = document.getElementById("bottomNav");
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "nav-btn admin-nav";
+    btn.dataset.tab = "admin";
+    btn.innerHTML =
+      '<span class="nav-icon">🛡</span><span class="nav-label">Админ</span>';
+    btn.addEventListener("click", () => switchTab("admin"));
+    nav.appendChild(btn);
+    adminNavInjected = true;
+  }
+
   // ── Collection ──
   function renderRarityFilters() {
     const container = document.getElementById("rarityFilters");
@@ -194,7 +270,7 @@
     const stats = collection.stats || {};
     const totals = collection.rarity_totals || {};
 
-    let html = `<button class="filter-chip ${
+    let html = `<button type="button" class="filter-chip ${
       currentFilter === "all" ? "active" : ""
     }" data-rarity="all">Все</button>`;
 
@@ -202,7 +278,7 @@
       const cnt = stats[key] || 0;
       if (cnt === 0 && currentFilter !== key) continue;
       const tot = totals[key] || 0;
-      html += `<button class="filter-chip ${
+      html += `<button type="button" class="filter-chip ${
         currentFilter === key ? "active" : ""
       }" data-rarity="${key}">
         ${info.icon} ${info.name} · ${cnt}${tot ? "/" + tot : ""}
@@ -249,14 +325,10 @@
     grid.innerHTML = items
       .map((c) => {
         const emoji = rarityEmoji(c.rarity);
-        // Всегда пробуем URL фото с API (даже если has_photo=false — вдруг файл есть)
-        const photoSrc =
-          API_BASE && c.id
-            ? API_BASE + (c.photo_url || `/api/card/${c.id}/photo`)
-            : null;
+        const photoSrc = cardPhotoSrc(c);
         const img = photoSrc
-            ? `<img class="card-img" src="${escAttr(photoSrc)}" alt="" loading="lazy" onerror="this.style.display='none';var e=this.nextElementSibling;if(e)e.style.display='inline'" /><span class="card-emoji" style="display:none">${emoji}</span>`
-            : `<span class="card-emoji">${emoji}</span>`;
+          ? `<img class="card-img" src="${escAttr(photoSrc)}" alt="" loading="lazy" onerror="this.style.display='none';var e=this.nextElementSibling;if(e)e.style.display='inline'" /><span class="card-emoji" style="display:none">${emoji}</span>`
+          : `<span class="card-emoji">${emoji}</span>`;
         return `
         <div class="card-item" data-id="${c.id}">
           <div class="card-thumb">
@@ -285,23 +357,146 @@
     const list = document.getElementById("marketList");
     list.innerHTML = (market.rarities || [])
       .map((r) => {
+        const done = !!r.collected;
         return `
-        <div class="market-item">
+        <div class="market-item ${done ? "is-done" : ""}" data-rarity="${r.key}" data-missing="${r.missing}">
           <div class="market-icon ${r.key}">${r.icon}</div>
           <div class="market-info-text">
             <div class="market-name">${escHtml(r.name)}</div>
             <div class="market-desc">${
-              r.collected ? "Все собраны" : `Не хватает ${r.missing} шт`
+              done ? "Все собраны" : `Не хватает ${r.missing} шт · нажми, чтобы купить`
             }</div>
           </div>
           ${
-            r.collected
+            done
               ? '<span class="market-done">✓ собрано</span>'
               : `<span class="market-price">${r.price} 💎</span>`
           }
         </div>`;
       })
       .join("");
+
+    list.querySelectorAll(".market-item:not(.is-done)").forEach((el) => {
+      el.addEventListener("click", () => {
+        openMarketBrowser(el.dataset.rarity);
+        haptic("light");
+      });
+    });
+  }
+
+  function showMarketList() {
+    document.getElementById("marketBrowser").classList.add("hidden");
+    document.getElementById("marketList").classList.remove("hidden");
+    document.getElementById("exchangeCard").classList.remove("hidden");
+    browserRarity = null;
+    browserData = null;
+  }
+
+  async function openMarketBrowser(rarity) {
+    browserRarity = rarity;
+    browserPage = 0;
+    document.getElementById("marketList").classList.add("hidden");
+    document.getElementById("exchangeCard").classList.add("hidden");
+    document.getElementById("marketBrowser").classList.remove("hidden");
+    const info = RARITIES[rarity] || { name: rarity, icon: "" };
+    document.getElementById("browserTitle").textContent =
+      `${info.icon} ${info.name}`;
+    await loadBrowserPage();
+  }
+
+  async function loadBrowserPage() {
+    const box = document.getElementById("browserCard");
+    const buyBtn = document.getElementById("browserBuy");
+    box.innerHTML = '<div class="empty-state"><p>Загрузка…</p></div>';
+    buyBtn.disabled = true;
+
+    try {
+      browserData = await api(
+        `/api/market/cards?rarity=${encodeURIComponent(browserRarity)}&page=${browserPage}`
+      );
+    } catch (e) {
+      box.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`;
+      document.getElementById("browserPage").textContent = "—";
+      document.getElementById("browserPrev").disabled = true;
+      document.getElementById("browserNext").disabled = true;
+      return;
+    }
+
+    const total = browserData.total || 0;
+    const page = browserData.page || 0;
+    browserPage = page;
+
+    document.getElementById("browserPage").textContent =
+      total ? `${page + 1} / ${total}` : "0 / 0";
+    document.getElementById("browserPrev").disabled = page <= 0;
+    document.getElementById("browserNext").disabled = page >= total - 1 || total === 0;
+
+    if (!browserData.card || total === 0) {
+      box.innerHTML =
+        '<div class="empty-state"><div class="empty-icon">✓</div><p>Все карточки этой редкости собраны</p></div>';
+      buyBtn.disabled = true;
+      buyBtn.textContent = "Купить";
+      return;
+    }
+
+    const card = browserData.card;
+    const emoji = rarityEmoji(card.rarity);
+    const photoSrc = cardPhotoSrc({
+      id: card.id,
+      photo_url: `/api/card/${card.id}/photo`,
+    });
+    const price = browserData.price || 0;
+    const gems = browserData.gems || 0;
+
+    box.innerHTML = `
+      <div class="browser-thumb">
+        ${
+          photoSrc
+            ? `<img src="${escAttr(photoSrc)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'" /><span class="card-emoji-lg" style="display:none">${emoji}</span>`
+            : `<span class="card-emoji-lg">${emoji}</span>`
+        }
+      </div>
+      <div class="browser-body">
+        <div class="browser-name">${escHtml(card.name)}</div>
+        <div class="browser-meta">${browserData.rarity_icon || ""} ${escHtml(
+          browserData.rarity_name || card.rarity
+        )} · ${price} 💎</div>
+      </div>`;
+
+    buyBtn.disabled = gems < price;
+    buyBtn.textContent =
+      gems < price
+        ? `Нужно ${price} 💎 (у вас ${gems})`
+        : `Купить за ${price} 💎`;
+  }
+
+  async function doBuyCurrent() {
+    if (!browserData?.card) return;
+    const cardId = browserData.card.id;
+    try {
+      const res = await api("/api/market/buy", {
+        method: "POST",
+        body: JSON.stringify({ card_id: cardId }),
+      });
+      toast(`✓ ${res.card?.name || "Карточка"} куплена`);
+      haptic("success");
+      if (me) {
+        me.gems = res.gems;
+        renderHeader();
+        renderProfile();
+      }
+      await loadMarket();
+      // reload same page index (list shrinks)
+      await loadBrowserPage();
+      if (browserData && browserData.total === 0) {
+        showMarketList();
+        renderMarket();
+      }
+      collection = null; // force refresh on next visit
+    } catch (e) {
+      toast(e.message || "Ошибка покупки");
+      haptic("error");
+    }
   }
 
   // ── Top ──
@@ -336,6 +531,73 @@
       ${escHtml(meRow.nickname || "")} · <b>${fmt(meRow.value)}</b> ${unit}`;
   }
 
+  // ── Admin ──
+  function renderAdmin() {
+    const statsEl = document.getElementById("adminStats");
+    const logEl = document.getElementById("adminLog");
+    if (!adminData) {
+      statsEl.innerHTML = '<div class="empty-state"><p>Загрузка…</p></div>';
+      logEl.innerHTML = "";
+      return;
+    }
+
+    const s = adminData.stats || {};
+    statsEl.innerHTML = `
+      <div class="admin-stat-card">
+        <div class="label">Игроков</div>
+        <div class="value">${fmt(s.users_total || 0)}</div>
+      </div>
+      <div class="admin-stat-card">
+        <div class="label">Карточек в игре</div>
+        <div class="value">${fmt(s.cards_total || 0)}</div>
+      </div>
+      <div class="admin-stat-card">
+        <div class="label">Выдано (шт)</div>
+        <div class="value">${fmt(s.inventory_total || 0)}</div>
+      </div>
+      <div class="admin-stat-card">
+        <div class="label">Забанено</div>
+        <div class="value">${fmt(s.banned || 0)}</div>
+      </div>
+      <div class="admin-stat-card">
+        <div class="label">Монет в обороте</div>
+        <div class="value">${fmt(s.coins_sum || 0)}</div>
+      </div>
+      <div class="admin-stat-card">
+        <div class="label">Кристаллов</div>
+        <div class="value">${fmt(s.gems_sum || 0)}</div>
+      </div>`;
+
+    const logs = adminData.recent || [];
+    if (!logs.length) {
+      logEl.innerHTML =
+        '<div class="empty-state"><p>Нет недавних получений</p></div>';
+      return;
+    }
+
+    logEl.innerHTML = logs
+      .map((row) => {
+        const t = row.claim_time
+          ? new Date(row.claim_time * 1000).toLocaleString("ru-RU", {
+              day: "2-digit",
+              month: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "—";
+        return `
+        <div class="admin-log-row">
+          <div class="time">${escHtml(t)}</div>
+          <div class="body">
+            <b>${escHtml(row.nickname || "User" + row.user_id)}</b>
+            получил ${row.rarity_icon || ""} ${escHtml(row.card_name || "?")}
+            ${row.amount > 1 ? "×" + row.amount : ""}
+          </div>
+        </div>`;
+      })
+      .join("");
+  }
+
   // ── Modal ──
   async function openCardModal(cardId) {
     const local =
@@ -355,14 +617,12 @@
 
   function showModal(card) {
     const modalPhoto = document.getElementById("modalPhoto");
-    const photoSrc =
-      API_BASE && card.id
-        ? API_BASE + (card.photo_url || `/api/card/${card.id}/photo`)
-        : null;
+    const photoSrc = cardPhotoSrc(card);
+    const emoji = rarityEmoji(card.rarity);
     if (photoSrc) {
-      modalPhoto.innerHTML = `<img src="${escAttr(photoSrc)}" alt="" onerror="this.parentNode.innerHTML='<span class=\'card-emoji-lg\'>${rarityEmoji(card.rarity)}</span>'" />`;
+      modalPhoto.innerHTML = `<img src="${escAttr(photoSrc)}" alt="" onerror="this.parentNode.innerHTML='<span class=\\'card-emoji-lg\\'>${emoji}</span>'" />`;
     } else {
-      modalPhoto.innerHTML = `<span class="card-emoji-lg">${rarityEmoji(card.rarity)}</span>`;
+      modalPhoto.innerHTML = `<span class="card-emoji-lg">${emoji}</span>`;
     }
     document.getElementById("modalName").textContent = card.name;
     document.getElementById("modalRarity").innerHTML =
@@ -384,6 +644,7 @@
     me = await api("/api/me");
     renderHeader();
     renderProfile();
+    ensureAdminNav();
   }
 
   async function loadCollection() {
@@ -402,38 +663,36 @@
     renderTop();
   }
 
-  async function refreshAll() {
-    try {
-      await loadMe();
-      await Promise.all([loadCollection(), loadMarket(), loadTop()]);
-      document.querySelector(".setup-banner")?.remove();
-    } catch (e) {
-      console.error(e);
-      toast(e.message || "Не удалось загрузить данные");
-      showSetupHelp(e.message);
-    }
+  async function loadAdmin() {
+    adminData = await api("/api/admin/overview");
+    renderAdmin();
   }
 
-  function showSetupHelp(msg) {
-    if (document.querySelector(".setup-banner")) return;
-    const content = document.getElementById("content");
-    const banner = document.createElement("div");
-    banner.className = "setup-banner";
-    banner.innerHTML = `
-      <div class="setup-card">
-        <h3>⚠️ Нет данных из бота</h3>
-        <p>${escHtml(msg || "API недоступен")}</p>
-        <p class="muted">Нужно:</p>
-        <ol>
-          <li>Запустить <code>api.py</code> на сервере с БД бота</li>
-          <li>В <code>index.html</code> указать:
-            <pre>window.MEOW_API_BASE = "https://твой-api.ru";</pre>
-          </li>
-          <li>Открыть мини-аппку <b>из Telegram</b> (кнопка бота)</li>
-        </ol>
-        <p class="muted">Подробности — в README.md</p>
-      </div>`;
-    content.prepend(banner);
+  async function refreshAll() {
+    try {
+      hideFatal();
+      await loadMe();
+      await Promise.all([loadCollection(), loadMarket(), loadTop()]);
+      if (me && isAdminRole(me.role)) {
+        loadAdmin().catch(() => {});
+      }
+    } catch (e) {
+      console.error(e);
+      const msg = e.message || "Не удалось загрузить данные";
+      const steps = [];
+      if (!API_BASE) {
+        steps.push(
+          'В <code>index.html</code> задай <code>window.MEOW_API_BASE = "https://…"</code>'
+        );
+      }
+      if (!isTelegram()) {
+        steps.push("Открой мини-аппку <b>из Telegram</b> (кнопка Web App в боте)");
+      }
+      steps.push("Убедись, что <code>api.py</code> запущен и доступен по HTTPS");
+      steps.push("Проверь CORS и совпадение BOT_TOKEN");
+      showFatal("Нет данных из бота", msg, steps);
+      toast(msg);
+    }
   }
 
   async function doExchange(amount) {
@@ -473,6 +732,7 @@
         renderCollection();
       }
     } else if (tab === "market") {
+      showMarketList();
       if (!market) loadMarket().catch((e) => toast(e.message));
       else renderMarket();
     } else if (tab === "top") {
@@ -480,6 +740,14 @@
       else renderTop();
     } else if (tab === "profile") {
       renderProfile();
+    } else if (tab === "admin") {
+      if (!me || !isAdminRole(me.role)) {
+        toast("Недостаточно прав");
+        switchTab("profile");
+        return;
+      }
+      if (!adminData) loadAdmin().catch((e) => toast(e.message));
+      else renderAdmin();
     }
   }
 
@@ -527,23 +795,62 @@
     .querySelector(".modal-backdrop")
     .addEventListener("click", closeCardModal);
 
+  document.getElementById("browserClose").addEventListener("click", () => {
+    showMarketList();
+    haptic("light");
+  });
+  document.getElementById("browserPrev").addEventListener("click", async () => {
+    if (browserPage > 0) {
+      browserPage -= 1;
+      await loadBrowserPage();
+      haptic("light");
+    }
+  });
+  document.getElementById("browserNext").addEventListener("click", async () => {
+    if (browserData && browserPage < (browserData.total || 0) - 1) {
+      browserPage += 1;
+      await loadBrowserPage();
+      haptic("light");
+    }
+  });
+  document.getElementById("browserBuy").addEventListener("click", doBuyCurrent);
+
+  document.getElementById("adminRefresh")?.addEventListener("click", async () => {
+    try {
+      await loadAdmin();
+      toast("Админ-данные обновлены");
+      haptic("success");
+    } catch (e) {
+      toast(e.message);
+      haptic("error");
+    }
+  });
+
+  document.getElementById("fatalRetry").addEventListener("click", () => {
+    refreshAll();
+  });
+
   document.querySelector(".header")?.addEventListener("dblclick", () => {
     refreshAll();
     toast("Обновление…");
   });
 
-  // Start
+  // Start: setup checks first, then load
   if (!API_BASE) {
-    showSetupHelp(
-      'Не задан адрес API. Добавь в index.html: window.MEOW_API_BASE = "https://твой-api.ru";'
-    );
+    showFatal("API не настроен", "Адрес сервера не указан.", [
+      'В <code>index.html</code> добавь:<br><code>window.MEOW_API_BASE = "https://твой-api.ru";</code>',
+      "Задеплой фронт и открой из Telegram",
+    ]);
   } else if (!isTelegram()) {
-    showSetupHelp(
-      "Мини-аппка открыта не из Telegram. Нажми кнопку Web App в боте — появятся твои данные."
+    showFatal(
+      "Открой из Telegram",
+      "Мини-аппка открыта вне Telegram — нет initData.",
+      [
+        "Нажми кнопку Web App в боте",
+        "Или Menu Button в BotFather с URL фронта",
+      ]
     );
-  }
-
-  if (API_BASE && isTelegram()) {
+  } else {
     refreshAll();
   }
 })();
