@@ -3,23 +3,27 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#0f0f13" />
-  <title>Мряу — Карточки</title>
+  <meta name="color-scheme" content="dark" />
+  <title>Мряу</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Укажи URL API (хост, где крутится api.py)
+    window.MEOW_API_BASE = "https://YOUR-API-HOST";
+  </script>
 </head>
 <body>
-  <!-- Full-screen error / offline overlay -->
-  <div id="fatalOverlay" class="fatal-overlay hidden" aria-live="assertive">
+  <!-- Fatal overlay -->
+  <div id="fatalOverlay" class="fatal-overlay hidden">
     <div class="fatal-card">
-      <div class="fatal-icon" id="fatalIcon">⚠️</div>
-      <h2 id="fatalTitle">Нет связи с сервером</h2>
-      <p id="fatalMessage">Не удалось загрузить данные. Проверьте интернет и настройки API.</p>
+      <div class="fatal-icon">😿</div>
+      <h2 id="fatalTitle">Ошибка</h2>
+      <p id="fatalMessage"></p>
       <ol id="fatalSteps" class="fatal-steps"></ol>
-      <button type="button" class="fatal-retry" id="fatalRetry">Повторить</button>
+      <button type="button" id="fatalRetry" class="fatal-retry">Повторить</button>
     </div>
   </div>
 
@@ -27,56 +31,95 @@
     <!-- Header -->
     <header class="header">
       <div class="header-left">
-        <div class="avatar" id="userAvatar">
-          <span class="avatar-fallback">🐱</span>
-        </div>
+        <div id="userAvatar" class="avatar"><span class="avatar-fallback">🐱</span></div>
         <div class="user-info">
-          <div class="nickname" id="userNickname">Загрузка…</div>
-          <div class="user-id" id="userId">—</div>
+          <div id="userNickname" class="nickname">…</div>
+          <div class="balance-inline-header">
+            <span class="icon">🪙</span>
+            <span id="coinsValue">0</span>
+          </div>
         </div>
       </div>
       <div class="header-right">
-        <div class="balance-pill coins" title="Монеты">
-          <span class="icon">🪙</span>
-          <span id="coinsValue">0</span>
-        </div>
-        <div class="balance-pill gems" title="Кристаллы">
-          <span class="icon">💎</span>
-          <span id="gemsValue">0</span>
-        </div>
+        <button type="button" id="helpBtn" class="icon-btn" title="Помощь" aria-label="Помощь">❓</button>
       </div>
     </header>
 
-    <!-- Main content -->
-    <main class="content" id="content">
-      <!-- Profile tab -->
-      <section class="tab-panel active" data-tab="profile">
-        <div class="profile-card">
+    <!-- Content -->
+    <main class="content">
+      <!-- Карточки (бывшая коллекция) -->
+      <section class="tab-panel active" data-tab="cards">
+        <div class="section-header">
+          <h2>Карточки</h2>
+          <div class="collection-progress">
+            <span id="collOwned">0</span>/<span id="collTotal">0</span>
+          </div>
+        </div>
+        <div id="rarityFilters" class="rarity-filters"></div>
+        <div id="cardsGrid" class="cards-grid">
+          <div class="empty-state"><div class="empty-icon">⏳</div><p>Загрузка…</p></div>
+        </div>
+      </section>
+
+      <!-- Получить -->
+      <section class="tab-panel" data-tab="claim">
+        <div class="claim-screen">
+          <div id="claimIdle" class="claim-idle">
+            <div class="claim-hero-icon">🃏</div>
+            <h2 class="claim-title">Получить карточку</h2>
+            <p class="claim-desc">Бесплатная карточка раз в 4 часа</p>
+            <div id="claimTimerBlock" class="claim-timer-block hidden">
+              <div class="claim-timer-label">До следующей</div>
+              <div id="claimTimer" class="claim-timer">00:00:00</div>
+            </div>
+            <button type="button" id="claimBtn" class="claim-btn hidden">Получить карточку</button>
+          </div>
+          <div id="claimResult" class="claim-result hidden">
+            <div id="claimResultCard" class="claim-result-card"></div>
+            <div id="claimResultMeta" class="claim-result-meta"></div>
+            <button type="button" id="claimAgainBtn" class="claim-btn secondary">Назад</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Топ -->
+      <section class="tab-panel" data-tab="top">
+        <div class="section-header">
+          <h2>Топ</h2>
+        </div>
+        <div class="top-tabs">
+          <button type="button" class="top-tab active" data-kind="coins">🪙 Монеты</button>
+          <button type="button" class="top-tab" data-kind="cards">🃏 Карточки</button>
+          <button type="button" class="top-tab" data-kind="streak">🔥 Стрик</button>
+        </div>
+        <div id="topList" class="top-list">
+          <div class="empty-state"><p>Загрузка…</p></div>
+        </div>
+        <div id="myRank" class="my-rank"></div>
+      </section>
+
+      <!-- Профиль -->
+      <section class="tab-panel" data-tab="profile">
+        <div class="profile-card" id="profileCard">
           <div class="profile-bg"></div>
           <div class="profile-body">
-            <div class="profile-avatar-large" id="profileAvatar">
-              <span class="avatar-fallback">🐱</span>
-            </div>
-            <h1 class="profile-name" id="profileName">—</h1>
-            <div class="profile-role" id="profileRole">👤 Пользователь</div>
+            <div id="profileAvatar" class="profile-avatar-large"><span class="avatar-fallback">🐱</span></div>
+            <div id="profileName" class="profile-name">…</div>
             <div class="stats-grid">
               <div class="stat">
-                <div class="stat-value" id="statCards">0</div>
+                <div id="statCards" class="stat-value">0</div>
                 <div class="stat-label">Карточек</div>
               </div>
               <div class="stat">
-                <div class="stat-value" id="statStreak">0</div>
+                <div id="statStreak" class="stat-value">0</div>
                 <div class="stat-label">Стрик</div>
               </div>
               <div class="stat">
-                <div class="stat-value" id="statDays">—</div>
-                <div class="stat-label">С нами</div>
+                <div id="statDays" class="stat-value">0</div>
+                <div class="stat-label">Дней</div>
               </div>
             </div>
-            <div class="gender-row" id="genderRow">
-              <span class="gender-icon">—</span>
-              <span class="gender-text">Не задан</span>
-            </div>
+            <div class="profile-hint muted">Двойной тап по профилю — админка</div>
           </div>
         </div>
 
@@ -84,209 +127,178 @@
         <div class="action-grid">
           <button type="button" class="action-btn" data-action="claim">
             <span class="action-icon">🃏</span>
-            <span class="action-label">Получить карточку</span>
-            <span class="action-hint" id="claimHint">Готово</span>
+            <span class="action-label">Получить</span>
+            <span id="claimHint" class="action-hint">…</span>
           </button>
           <button type="button" class="action-btn" data-action="dice">
             <span class="action-icon">🎲</span>
             <span class="action-label">Кубик</span>
-            <span class="action-hint">−10…+10 🪙</span>
-          </button>
-          <button type="button" class="action-btn" data-action="market">
-            <span class="action-icon">🛒</span>
-            <span class="action-label">Маркет</span>
-            <span class="action-hint">Купить за 💎</span>
+            <span class="action-hint">в боте: мряу кубик</span>
           </button>
           <button type="button" class="action-btn" data-action="top">
             <span class="action-icon">🏆</span>
             <span class="action-label">Топ</span>
-            <span class="action-hint">Рейтинг</span>
+            <span class="action-hint">рейтинг</span>
+          </button>
+          <button type="button" class="action-btn" data-action="cards">
+            <span class="action-icon">📚</span>
+            <span class="action-label">Карточки</span>
+            <span class="action-hint">коллекция</span>
           </button>
         </div>
-
-        <div class="pull-hint muted">Двойной тап по шапке — обновить данные</div>
+        <p class="pull-hint muted">Двойной тап по шапке — обновить данные</p>
       </section>
 
-      <!-- Collection tab -->
-      <section class="tab-panel" data-tab="collection">
-        <div class="section-header">
-          <h2>Моя коллекция</h2>
-          <div class="collection-progress">
-            <span id="collOwned">0</span> / <span id="collTotal">0</span>
-          </div>
+      <!-- Помощь (полноэкранная страница) -->
+      <section class="tab-panel page-panel" data-tab="help">
+        <div class="page-header">
+          <button type="button" class="back-btn" data-back="profile">← Назад</button>
+          <h2>Помощь</h2>
         </div>
-        <div class="rarity-filters" id="rarityFilters"></div>
-        <div class="cards-grid" id="cardsGrid">
-          <div class="empty-state">
-            <div class="empty-icon">🃏</div>
-            <p>Пока нет карточек</p>
-            <p class="muted">Напиши «мряу» в боте, чтобы получить первую</p>
-          </div>
-        </div>
-      </section>
-
-      <!-- Market tab -->
-      <section class="tab-panel" data-tab="market">
-        <div class="section-header">
-          <h2>Маркет</h2>
-          <div class="balance-inline">
-            💎 <span id="marketGems">0</span>
-          </div>
-        </div>
-        <div class="market-info">
-          <p>Покупай недостающие карточки за кристаллы. Курс: <b>1 💎 = 100 🪙</b></p>
-        </div>
-        <div class="market-list" id="marketList"></div>
-
-        <!-- Browser for buying a specific missing card -->
-        <div class="market-browser hidden" id="marketBrowser">
-          <div class="section-header">
-            <h3 id="browserTitle">Карточки</h3>
-            <button type="button" class="text-btn" id="browserClose">← Назад</button>
-          </div>
-          <div class="browser-nav">
-            <button type="button" class="nav-arrow" id="browserPrev" aria-label="Предыдущая">‹</button>
-            <span class="browser-page" id="browserPage">1 / 1</span>
-            <button type="button" class="nav-arrow" id="browserNext" aria-label="Следующая">›</button>
-          </div>
-          <div class="browser-card" id="browserCard">
-            <div class="empty-state"><p>Загрузка…</p></div>
-          </div>
-          <button type="button" class="buy-btn" id="browserBuy" disabled>Купить</button>
-        </div>
-
-        <div class="exchange-card" id="exchangeCard">
-          <h3>💱 Обмен монет → кристаллы</h3>
-          <div class="exchange-row">
-            <button type="button" class="ex-btn" data-amount="1">+1 💎 · 100 🪙</button>
-            <button type="button" class="ex-btn" data-amount="5">+5 💎 · 500 🪙</button>
-            <button type="button" class="ex-btn" data-amount="10">+10 💎 · 1 000 🪙</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Top tab -->
-      <section class="tab-panel" data-tab="top">
-        <div class="section-header">
-          <h2>Топ игроков</h2>
-        </div>
-        <div class="top-tabs">
-          <button type="button" class="top-tab active" data-kind="coins">🪙 Монеты</button>
-          <button type="button" class="top-tab" data-kind="cards">🃏 Карты</button>
-          <button type="button" class="top-tab" data-kind="streak">🔥 Стрик</button>
-        </div>
-        <div class="top-list" id="topList"></div>
-        <div class="my-rank" id="myRank"></div>
-      </section>
-
-      <!-- Admin tab (only for admin / superadmin) -->
-      <section class="tab-panel" data-tab="admin">
-        <div class="section-header">
-          <h2>Админ</h2>
-          <button type="button" class="text-btn" id="adminRefresh">Обновить</button>
-        </div>
-        <div class="admin-stats" id="adminStats">
+        <div id="helpContent" class="help-content">
           <div class="empty-state"><p>Загрузка…</p></div>
         </div>
-        <div class="section-title">Последние получения</div>
-        <div class="admin-log" id="adminLog">
-          <div class="empty-state"><p>Нет данных</p></div>
-        </div>
       </section>
 
-      <!-- Help tab -->
-      <section class="tab-panel" data-tab="help">
-        <div class="help-content">
-          <div class="help-block">
-            <h3>🃏 Получить карточку</h3>
-            <p>Напиши <b>«мряу»</b> в чате с ботом или нажми кнопку. Бесплатно раз в 4 часа. Можно ускорить за монеты в боте.</p>
+      <!-- Админка (полноэкранная страница) -->
+      <section class="tab-panel page-panel" data-tab="admin">
+        <div class="page-header">
+          <button type="button" class="back-btn" data-back="profile">← Назад</button>
+          <h2>Админка</h2>
+          <button type="button" id="adminRefresh" class="text-btn">Обновить</button>
+        </div>
+
+        <div class="admin-tabs">
+          <button type="button" class="admin-tab active" data-admin="overview">Обзор</button>
+          <button type="button" class="admin-tab" data-admin="cards">Карточки</button>
+          <button type="button" class="admin-tab" data-admin="users">Игроки</button>
+        </div>
+
+        <!-- Overview -->
+        <div id="adminOverview" class="admin-section">
+          <div id="adminStats" class="admin-stats"></div>
+          <div class="section-title">Последние получения</div>
+          <div id="adminLog" class="admin-log"></div>
+        </div>
+
+        <!-- Cards management -->
+        <div id="adminCards" class="admin-section hidden">
+          <div class="admin-toolbar">
+            <input type="search" id="adminCardSearch" class="admin-input" placeholder="Поиск…" />
+            <select id="adminCardRarity" class="admin-select">
+              <option value="">Все редкости</option>
+              <option value="common">⚪ Обычная</option>
+              <option value="rare">🔵 Редкая</option>
+              <option value="epic">🟣 Эпическая</option>
+              <option value="mythical">🔴 Мифическая</option>
+              <option value="legendary">🟡 Легендарная</option>
+            </select>
+            <button type="button" id="adminCardAdd" class="claim-btn small">+ Добавить</button>
           </div>
-          <div class="help-block">
-            <h3>🔥 Стрик</h3>
-            <p>Заходи каждый день — стрик растёт, бонусные монеты увеличиваются. Пропуск 24 часов сбрасывает стрик. На 7 и 30 дней — бонус 💎.</p>
+          <div id="adminCardsList" class="admin-list"></div>
+          <div class="admin-pager">
+            <button type="button" id="adminCardsPrev" class="nav-arrow" disabled>‹</button>
+            <span id="adminCardsPage" class="browser-page">1</span>
+            <button type="button" id="adminCardsNext" class="nav-arrow" disabled>›</button>
           </div>
-          <div class="help-block">
-            <h3>💎 Кристаллы</h3>
-            <p>За новые мифические (+1) и легендарные (+2) карточки. Также за стрик 7 и 30 дней. В маркете покупаешь недостающие карты. Обмен: 100 🪙 = 1 💎.</p>
+        </div>
+
+        <!-- Users -->
+        <div id="adminUsers" class="admin-section hidden">
+          <div class="admin-toolbar">
+            <input type="search" id="adminUserSearch" class="admin-input" placeholder="Ник или ID…" />
+            <select id="adminUserRole" class="admin-select">
+              <option value="">Все роли</option>
+              <option value="user">Пользователь</option>
+              <option value="admin">Админ</option>
+              <option value="superadmin">Супер</option>
+              <option value="banned">Бан</option>
+            </select>
           </div>
-          <div class="help-block">
-            <h3>🎲 Кубик</h3>
-            <p>«мряу кубик» — раз в 10 минут, нужно минимум 10 🪙. Выпадает от −10 до +10 монет.</p>
+          <div id="adminUsersList" class="admin-list"></div>
+          <div class="admin-pager">
+            <button type="button" id="adminUsersPrev" class="nav-arrow" disabled>‹</button>
+            <span id="adminUsersPage" class="browser-page">1</span>
+            <button type="button" id="adminUsersNext" class="nav-arrow" disabled>›</button>
           </div>
-          <div class="help-block">
-            <h3>🛒 Маркет</h3>
-            <p>Открой редкость → листай недостающие карточки → купи за 💎. Цена зависит от редкости. Уже собранные не показываются.</p>
-          </div>
-          <div class="help-block">
-            <h3>Редкости</h3>
-            <div class="rarity-legend">
-              <div><span class="dot common"></span> Обычная · 10 🪙 · 1 💎 в маркете</div>
-              <div><span class="dot rare"></span> Редкая · 25 🪙 · 3 💎</div>
-              <div><span class="dot epic"></span> Эпическая · 50 🪙 · 8 💎</div>
-              <div><span class="dot mythical"></span> Мифическая · 75 🪙 +1 💎 · 20 💎</div>
-              <div><span class="dot legendary"></span> Легендарная · 100 🪙 +2 💎 · 50 💎</div>
+        </div>
+
+        <!-- User detail -->
+        <div id="adminUserDetail" class="admin-section hidden">
+          <button type="button" id="adminUserBack" class="text-btn">← К списку</button>
+          <div id="adminUserBody"></div>
+        </div>
+
+        <!-- Card form -->
+        <div id="adminCardForm" class="admin-section hidden">
+          <button type="button" id="adminCardFormBack" class="text-btn">← К списку</button>
+          <h3 id="adminCardFormTitle">Карточка</h3>
+          <form id="cardForm" class="admin-form">
+            <label>Название
+              <input type="text" id="cfName" required maxlength="128" class="admin-input" />
+            </label>
+            <label>Редкость
+              <select id="cfRarity" class="admin-select" required>
+                <option value="common">⚪ Обычная</option>
+                <option value="rare">🔵 Редкая</option>
+                <option value="epic">🟣 Эпическая</option>
+                <option value="mythical">🔴 Мифическая</option>
+                <option value="legendary">🟡 Легендарная</option>
+              </select>
+            </label>
+            <label>photo_id (Telegram)
+              <input type="text" id="cfPhotoId" class="admin-input" placeholder="опционально" />
+            </label>
+            <label>photo_path
+              <input type="text" id="cfPhotoPath" class="admin-input" placeholder="опционально" />
+            </label>
+            <div class="form-actions">
+              <button type="submit" class="claim-btn small">Сохранить</button>
+              <button type="button" id="cfDelete" class="claim-btn small danger hidden">Удалить</button>
             </div>
-          </div>
-          <div class="help-block">
-            <h3>Мини-аппка</h3>
-            <p>Обзор профиля, коллекции, маркета и топа. Получение карточек и кубик — только в чате с ботом. Двойной тап по шапке обновляет данные.</p>
-          </div>
-          <p class="help-footer">Все игровые действия выполняются в чате с ботом. Эта мини-аппка — удобный обзор твоего прогресса.</p>
+          </form>
         </div>
       </section>
     </main>
 
-    <!-- Bottom navigation -->
-    <nav class="bottom-nav" id="bottomNav">
-      <button type="button" class="nav-btn active" data-tab="profile">
-        <span class="nav-icon">👤</span>
-        <span class="nav-label">Профиль</span>
-      </button>
-      <button type="button" class="nav-btn" data-tab="collection">
+    <!-- Bottom nav -->
+    <nav id="bottomNav" class="bottom-nav">
+      <button type="button" class="nav-btn active" data-tab="cards">
         <span class="nav-icon">🃏</span>
-        <span class="nav-label">Коллекция</span>
+        <span class="nav-label">Карточки</span>
       </button>
-      <button type="button" class="nav-btn" data-tab="market">
-        <span class="nav-icon">🛒</span>
-        <span class="nav-label">Маркет</span>
+      <button type="button" class="nav-btn" data-tab="claim">
+        <span class="nav-icon">✨</span>
+        <span class="nav-label">Получить</span>
       </button>
       <button type="button" class="nav-btn" data-tab="top">
         <span class="nav-icon">🏆</span>
         <span class="nav-label">Топ</span>
       </button>
-      <button type="button" class="nav-btn" data-tab="help">
-        <span class="nav-icon">❓</span>
-        <span class="nav-label">Помощь</span>
+      <button type="button" class="nav-btn" data-tab="profile">
+        <span class="nav-icon">👤</span>
+        <span class="nav-label">Профиль</span>
       </button>
-      <!-- Admin nav injected by JS when role is admin/superadmin -->
     </nav>
   </div>
 
   <!-- Card modal -->
-  <div class="modal" id="cardModal">
+  <div id="cardModal" class="modal">
     <div class="modal-backdrop"></div>
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <div class="modal-photo" id="modalPhoto"></div>
+      <div id="modalPhoto" class="modal-photo"></div>
       <div class="modal-info">
-        <h2 id="modalName">—</h2>
-        <div class="modal-rarity" id="modalRarity">—</div>
-        <div class="modal-meta" id="modalMeta"></div>
+        <h2 id="modalName"></h2>
+        <div id="modalRarity" class="modal-rarity"></div>
+        <div id="modalMeta" class="modal-meta"></div>
       </div>
-      <button type="button" class="modal-close" id="modalClose">Закрыть</button>
+      <button type="button" id="modalClose" class="modal-close">Закрыть</button>
     </div>
   </div>
 
-  <!-- Toast -->
-  <div class="toast" id="toast" role="status"></div>
+  <div id="toast" class="toast"></div>
 
-  <!-- ═══ НАСТРОЙКА API ═══
-       Укажи URL, где крутится api.py (HTTPS обязателен для Telegram).
-       Пример: https://api.example.com
-  -->
-  <script>
-    window.MEOW_API_BASE = "https://bot-1788312110-6885-chekinikita.bothost.tech";
-  </script>
   <script src="app.js"></script>
 </body>
 </html>

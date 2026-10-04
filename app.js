@@ -1,8 +1,6 @@
 /**
- * Мряу Mini App — реальные данные из API бота
- *
- * Настройка: в index.html задай
- *   window.MEOW_API_BASE = "https://api.твой-домен.com";
+ * Мряу Mini App v2
+ * window.MEOW_API_BASE в index.html
  */
 
 (function () {
@@ -40,7 +38,7 @@
     return role === "admin" || role === "superadmin";
   }
 
-  // ── Fatal overlay (blocks entire UI) ──
+  // ── Fatal ──
   function showFatal(title, message, steps) {
     const overlay = document.getElementById("fatalOverlay");
     const app = document.getElementById("app");
@@ -71,7 +69,8 @@
       );
     }
     const initData = getInitData();
-    if (!initData) {
+    const needsAuth = !path.startsWith("/api/help") && !path.startsWith("/health");
+    if (needsAuth && !initData) {
       throw new Error(
         "Открой мини-аппку из Telegram (кнопка бота). Без initData API недоступен."
       );
@@ -80,14 +79,13 @@
     const url = API_BASE + path;
     let res;
     try {
-      res = await fetch(url, {
-        ...options,
-        headers: {
-          "Content-Type": "application/json",
-          "X-Telegram-Init-Data": initData,
-          ...(options.headers || {}),
-        },
-      });
+      const headers = {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      };
+      if (initData) headers["X-Telegram-Init-Data"] = initData;
+
+      res = await fetch(url, { ...options, headers });
     } catch (netErr) {
       throw new Error(
         "Сеть: не удалось связаться с API (" + url + "). Проверь HTTPS и CORS."
@@ -121,15 +119,21 @@
 
   let me = null;
   let collection = null;
-  let market = null;
   let topData = null;
   let adminData = null;
   let currentFilter = "all";
   let topKind = "coins";
-  let browserRarity = null;
-  let browserPage = 0;
-  let browserData = null;
-  let adminNavInjected = false;
+  let previousTab = "profile";
+  let claimTimerId = null;
+
+  // admin state
+  let adminCardsPage = 0;
+  let adminUsersPage = 0;
+  let adminCardsTotal = 0;
+  let adminUsersTotal = 0;
+  let editingCardId = null;
+  let adminUserDetailId = null;
+  const ADMIN_LIMIT = 30;
 
   function fmt(n) {
     return Number(n || 0).toLocaleString("ru-RU").replace(/\s/g, "\u00a0");
@@ -207,30 +211,34 @@
     el.appendChild(img);
   }
 
+  function formatCooldown(sec) {
+    const s = Math.max(0, Math.floor(sec));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const r = s % 60;
+    return (
+      String(h).padStart(2, "0") +
+      ":" +
+      String(m).padStart(2, "0") +
+      ":" +
+      String(r).padStart(2, "0")
+    );
+  }
+
   // ── Header / Profile ──
   function renderHeader() {
     if (!me) return;
     document.getElementById("userNickname").textContent = me.nickname;
-    document.getElementById("userId").textContent = `ID ${me.user_id}`;
     document.getElementById("coinsValue").textContent = fmt(me.coins);
-    document.getElementById("gemsValue").textContent = fmt(me.gems);
     setAvatar(document.getElementById("userAvatar"), me.photo_url, "🐱");
   }
 
   function renderProfile() {
     if (!me) return;
     document.getElementById("profileName").textContent = me.nickname;
-    document.getElementById("profileRole").textContent = me.role_display;
     document.getElementById("statCards").textContent = fmt(me.cards_count);
     document.getElementById("statStreak").textContent = me.streak;
     document.getElementById("statDays").textContent = me.days_with_us;
-
-    const parts = (me.gender_display || "— Не задан").split(" ");
-    document.querySelector("#genderRow .gender-icon").textContent =
-      parts[0] || "—";
-    document.querySelector("#genderRow .gender-text").textContent =
-      parts.slice(1).join(" ") || "Не задан";
-
     setAvatar(document.getElementById("profileAvatar"), me.photo_url, "🐱");
 
     const hint = document.getElementById("claimHint");
@@ -246,18 +254,124 @@
     }
   }
 
-  function ensureAdminNav() {
-    if (!me || !isAdminRole(me.role) || adminNavInjected) return;
-    const nav = document.getElementById("bottomNav");
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "nav-btn admin-nav";
-    btn.dataset.tab = "admin";
-    btn.innerHTML =
-      '<span class="nav-icon">🛡</span><span class="nav-label">Админ</span>';
-    btn.addEventListener("click", () => switchTab("admin"));
-    nav.appendChild(btn);
-    adminNavInjected = true;
+  // ── Claim tab ──
+  function stopClaimTimer() {
+    if (claimTimerId) {
+      clearInterval(claimTimerId);
+      claimTimerId = null;
+    }
+  }
+
+  function updateClaimUI() {
+    if (!me) return;
+    const idle = document.getElementById("claimIdle");
+    const result = document.getElementById("claimResult");
+    const timerBlock = document.getElementById("claimTimerBlock");
+    const timerEl = document.getElementById("claimTimer");
+    const btn = document.getElementById("claimBtn");
+
+    // если результат открыт — не трогаем
+    if (!result.classList.contains("hidden")) return;
+
+    idle.classList.remove("hidden");
+    result.classList.add("hidden");
+
+    const rem = me.cooldown_remaining || 0;
+    if (rem > 0) {
+      timerBlock.classList.remove("hidden");
+      btn.classList.add("hidden");
+      timerEl.textContent = formatCooldown(rem);
+      stopClaimTimer();
+      const start = Date.now();
+      const baseRem = rem;
+      claimTimerId = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - start) / 1000);
+        const left = Math.max(0, baseRem - elapsed);
+        me.cooldown_remaining = left;
+        timerEl.textContent = formatCooldown(left);
+        if (left <= 0) {
+          stopClaimTimer();
+          me.can_claim_free = true;
+          me.cooldown_remaining = 0;
+          updateClaimUI();
+          renderProfile();
+        }
+      }, 1000);
+    } else {
+      stopClaimTimer();
+      timerBlock.classList.add("hidden");
+      btn.classList.remove("hidden");
+      btn.disabled = false;
+      btn.textContent = "Получить карточку";
+    }
+  }
+
+  async function doClaim() {
+    const btn = document.getElementById("claimBtn");
+    btn.disabled = true;
+    btn.textContent = "Открываем…";
+    try {
+      const res = await api("/api/claim", { method: "POST", body: "{}" });
+      haptic("success");
+
+      me.coins = res.coins;
+      me.streak = res.streak;
+      me.last_claim = res.last_claim;
+      me.cooldown_remaining = res.cooldown_remaining;
+      me.can_claim_free = false;
+      me.cards_count = (me.cards_count || 0) + (res.is_new ? 1 : 0);
+
+      renderHeader();
+      renderProfile();
+      collection = null;
+
+      const card = res.card;
+      const photoSrc = cardPhotoSrc(card);
+      const emoji = rarityEmoji(card.rarity);
+      const box = document.getElementById("claimResultCard");
+      box.innerHTML = `
+        <div class="browser-thumb claim-thumb">
+          ${
+            photoSrc
+              ? `<img src="${escAttr(photoSrc)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'" /><span class="card-emoji-lg" style="display:none">${emoji}</span>`
+              : `<span class="card-emoji-lg">${emoji}</span>`
+          }
+        </div>
+        <div class="browser-body">
+          <div class="browser-name">${escHtml(card.name)}</div>
+          <div class="browser-meta">${card.rarity_icon || ""} ${escHtml(
+            card.rarity_name || card.rarity
+          )}</div>
+        </div>`;
+
+      const meta = [];
+      if (res.is_new) meta.push("✨ Новая!");
+      else meta.push("Уже была в коллекции");
+      meta.push(`+${res.reward_coins} 🪙`);
+      if (res.streak_increased) meta.push(`🔥 Стрик: ${res.streak}`);
+      else meta.push(`🔥 Стрик: ${res.streak}`);
+      document.getElementById("claimResultMeta").textContent = meta.join(" · ");
+
+      document.getElementById("claimIdle").classList.add("hidden");
+      document.getElementById("claimResult").classList.remove("hidden");
+      toast(`✓ ${card.name}`);
+    } catch (e) {
+      toast(e.message || "Ошибка");
+      haptic("error");
+      btn.disabled = false;
+      btn.textContent = "Получить карточку";
+      // обновить кулдаун если сервер сказал что не прошёл
+      try {
+        await loadMe();
+        updateClaimUI();
+      } catch (_) {}
+    }
+  }
+
+  function closeClaimResult() {
+    document.getElementById("claimResult").classList.add("hidden");
+    document.getElementById("claimIdle").classList.remove("hidden");
+    updateClaimUI();
   }
 
   // ── Collection ──
@@ -317,7 +431,7 @@
         <div class="empty-state">
           <div class="empty-icon">🃏</div>
           <p>Пока нет карточек</p>
-          <p class="muted">Напиши «мряу» в боте, чтобы получить первую</p>
+          <p class="muted">Открой вкладку «Получить» или напиши «мряу» в боте</p>
         </div>`;
       return;
     }
@@ -334,7 +448,6 @@
           <div class="card-thumb">
             ${img}
             <div class="card-rarity-bar ${c.rarity}"></div>
-            ${c.amount > 1 ? `<div class="card-amount">×${c.amount}</div>` : ""}
           </div>
           <div class="card-body">
             <div class="card-name">${escHtml(c.name)}</div>
@@ -347,156 +460,6 @@
     grid.querySelectorAll(".card-item").forEach((el) => {
       el.addEventListener("click", () => openCardModal(+el.dataset.id));
     });
-  }
-
-  // ── Market ──
-  function renderMarket() {
-    if (!market) return;
-    document.getElementById("marketGems").textContent = fmt(market.gems);
-
-    const list = document.getElementById("marketList");
-    list.innerHTML = (market.rarities || [])
-      .map((r) => {
-        const done = !!r.collected;
-        return `
-        <div class="market-item ${done ? "is-done" : ""}" data-rarity="${r.key}" data-missing="${r.missing}">
-          <div class="market-icon ${r.key}">${r.icon}</div>
-          <div class="market-info-text">
-            <div class="market-name">${escHtml(r.name)}</div>
-            <div class="market-desc">${
-              done ? "Все собраны" : `Не хватает ${r.missing} шт · нажми, чтобы купить`
-            }</div>
-          </div>
-          ${
-            done
-              ? '<span class="market-done">✓ собрано</span>'
-              : `<span class="market-price">${r.price} 💎</span>`
-          }
-        </div>`;
-      })
-      .join("");
-
-    list.querySelectorAll(".market-item:not(.is-done)").forEach((el) => {
-      el.addEventListener("click", () => {
-        openMarketBrowser(el.dataset.rarity);
-        haptic("light");
-      });
-    });
-  }
-
-  function showMarketList() {
-    document.getElementById("marketBrowser").classList.add("hidden");
-    document.getElementById("marketList").classList.remove("hidden");
-    document.getElementById("exchangeCard").classList.remove("hidden");
-    browserRarity = null;
-    browserData = null;
-  }
-
-  async function openMarketBrowser(rarity) {
-    browserRarity = rarity;
-    browserPage = 0;
-    document.getElementById("marketList").classList.add("hidden");
-    document.getElementById("exchangeCard").classList.add("hidden");
-    document.getElementById("marketBrowser").classList.remove("hidden");
-    const info = RARITIES[rarity] || { name: rarity, icon: "" };
-    document.getElementById("browserTitle").textContent =
-      `${info.icon} ${info.name}`;
-    await loadBrowserPage();
-  }
-
-  async function loadBrowserPage() {
-    const box = document.getElementById("browserCard");
-    const buyBtn = document.getElementById("browserBuy");
-    box.innerHTML = '<div class="empty-state"><p>Загрузка…</p></div>';
-    buyBtn.disabled = true;
-
-    try {
-      browserData = await api(
-        `/api/market/cards?rarity=${encodeURIComponent(browserRarity)}&page=${browserPage}`
-      );
-    } catch (e) {
-      box.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`;
-      document.getElementById("browserPage").textContent = "—";
-      document.getElementById("browserPrev").disabled = true;
-      document.getElementById("browserNext").disabled = true;
-      return;
-    }
-
-    const total = browserData.total || 0;
-    const page = browserData.page || 0;
-    browserPage = page;
-
-    document.getElementById("browserPage").textContent =
-      total ? `${page + 1} / ${total}` : "0 / 0";
-    document.getElementById("browserPrev").disabled = page <= 0;
-    document.getElementById("browserNext").disabled = page >= total - 1 || total === 0;
-
-    if (!browserData.card || total === 0) {
-      box.innerHTML =
-        '<div class="empty-state"><div class="empty-icon">✓</div><p>Все карточки этой редкости собраны</p></div>';
-      buyBtn.disabled = true;
-      buyBtn.textContent = "Купить";
-      return;
-    }
-
-    const card = browserData.card;
-    const emoji = rarityEmoji(card.rarity);
-    const photoSrc = cardPhotoSrc({
-      id: card.id,
-      photo_url: `/api/card/${card.id}/photo`,
-    });
-    const price = browserData.price || 0;
-    const gems = browserData.gems || 0;
-
-    box.innerHTML = `
-      <div class="browser-thumb">
-        ${
-          photoSrc
-            ? `<img src="${escAttr(photoSrc)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'" /><span class="card-emoji-lg" style="display:none">${emoji}</span>`
-            : `<span class="card-emoji-lg">${emoji}</span>`
-        }
-      </div>
-      <div class="browser-body">
-        <div class="browser-name">${escHtml(card.name)}</div>
-        <div class="browser-meta">${browserData.rarity_icon || ""} ${escHtml(
-          browserData.rarity_name || card.rarity
-        )} · ${price} 💎</div>
-      </div>`;
-
-    buyBtn.disabled = gems < price;
-    buyBtn.textContent =
-      gems < price
-        ? `Нужно ${price} 💎 (у вас ${gems})`
-        : `Купить за ${price} 💎`;
-  }
-
-  async function doBuyCurrent() {
-    if (!browserData?.card) return;
-    const cardId = browserData.card.id;
-    try {
-      const res = await api("/api/market/buy", {
-        method: "POST",
-        body: JSON.stringify({ card_id: cardId }),
-      });
-      toast(`✓ ${res.card?.name || "Карточка"} куплена`);
-      haptic("success");
-      if (me) {
-        me.gems = res.gems;
-        renderHeader();
-        renderProfile();
-      }
-      await loadMarket();
-      // reload same page index (list shrinks)
-      await loadBrowserPage();
-      if (browserData && browserData.total === 0) {
-        showMarketList();
-        renderMarket();
-      }
-      collection = null; // force refresh on next visit
-    } catch (e) {
-      toast(e.message || "Ошибка покупки");
-      haptic("error");
-    }
   }
 
   // ── Top ──
@@ -531,8 +494,67 @@
       ${escHtml(meRow.nickname || "")} · <b>${fmt(meRow.value)}</b> ${unit}`;
   }
 
+  // ── Help ──
+  async function loadHelp() {
+    const el = document.getElementById("helpContent");
+    try {
+      const data = await api("/api/help");
+      el.innerHTML = (data.sections || [])
+        .map(
+          (s) => `
+        <div class="help-block">
+          <h3>${escHtml(s.title)}</h3>
+          <p>${escHtml(s.text)}</p>
+        </div>`
+        )
+        .join("");
+    } catch (_) {
+      // fallback offline
+      el.innerHTML = `
+        <div class="help-block">
+          <h3>🃏 Как получить карточку</h3>
+          <p>Напиши «мряу» в чате с ботом или нажми «Получить карточку» в мини-приложении. Кулдаун — 4 часа.</p>
+        </div>
+        <div class="help-block">
+          <h3>🔥 Стрик</h3>
+          <p>Получай карточку каждый день, чтобы наращивать стрик. Если пропустишь день — стрик сбросится.</p>
+        </div>
+        <div class="help-block">
+          <h3>🪙 Монеты</h3>
+          <p>За каждую карточку начисляются монеты: обычная +10, редкая +25, эпическая +50, мифическая +75, легендарная +100.</p>
+        </div>
+        <div class="help-block">
+          <h3>🎲 Кубик</h3>
+          <p>Напиши «мряу кубик» в боте, чтобы бросить кубик и получить бонус.</p>
+        </div>
+        <div class="help-block">
+          <h3>📊 Редкости</h3>
+          <div class="rarity-legend">
+            <div><span class="dot common"></span>Обычная</div>
+            <div><span class="dot rare"></span>Редкая</div>
+            <div><span class="dot epic"></span>Эпическая</div>
+            <div><span class="dot mythical"></span>Мифическая</div>
+            <div><span class="dot legendary"></span>Легендарная</div>
+          </div>
+        </div>
+        <div class="help-block">
+          <h3>📱 Мини-приложение</h3>
+          <p>Карточки — коллекция. Получить — бесплатная карточка. Топ — рейтинг. Профиль — статистика.</p>
+        </div>`;
+    }
+  }
+
   // ── Admin ──
-  function renderAdmin() {
+  function showAdminSection(name) {
+    ["adminOverview", "adminCards", "adminUsers", "adminUserDetail", "adminCardForm"].forEach(
+      (id) => {
+        document.getElementById(id)?.classList.add("hidden");
+      }
+    );
+    document.getElementById(name)?.classList.remove("hidden");
+  }
+
+  function renderAdminOverview() {
     const statsEl = document.getElementById("adminStats");
     const logEl = document.getElementById("adminLog");
     if (!adminData) {
@@ -548,7 +570,7 @@
         <div class="value">${fmt(s.users_total || 0)}</div>
       </div>
       <div class="admin-stat-card">
-        <div class="label">Карточек в игре</div>
+        <div class="label">Карточек</div>
         <div class="value">${fmt(s.cards_total || 0)}</div>
       </div>
       <div class="admin-stat-card">
@@ -560,12 +582,8 @@
         <div class="value">${fmt(s.banned || 0)}</div>
       </div>
       <div class="admin-stat-card">
-        <div class="label">Монет в обороте</div>
+        <div class="label">Монет</div>
         <div class="value">${fmt(s.coins_sum || 0)}</div>
-      </div>
-      <div class="admin-stat-card">
-        <div class="label">Кристаллов</div>
-        <div class="value">${fmt(s.gems_sum || 0)}</div>
       </div>`;
 
     const logs = adminData.recent || [];
@@ -591,11 +609,307 @@
           <div class="body">
             <b>${escHtml(row.nickname || "User" + row.user_id)}</b>
             получил ${row.rarity_icon || ""} ${escHtml(row.card_name || "?")}
-            ${row.amount > 1 ? "×" + row.amount : ""}
           </div>
         </div>`;
       })
       .join("");
+  }
+
+  async function loadAdminCards() {
+    const q = document.getElementById("adminCardSearch").value.trim();
+    const rarity = document.getElementById("adminCardRarity").value;
+    const params = new URLSearchParams({
+      page: String(adminCardsPage),
+      limit: String(ADMIN_LIMIT),
+    });
+    if (q) params.set("q", q);
+    if (rarity) params.set("rarity", rarity);
+
+    const data = await api("/api/admin/cards?" + params.toString());
+    adminCardsTotal = data.total || 0;
+    const list = document.getElementById("adminCardsList");
+    const cards = data.cards || [];
+
+    if (!cards.length) {
+      list.innerHTML = '<div class="empty-state"><p>Нет карточек</p></div>';
+    } else {
+      list.innerHTML = cards
+        .map((c) => {
+          const emoji = rarityEmoji(c.rarity);
+          return `
+          <div class="admin-row" data-id="${c.id}">
+            <div class="admin-row-icon">${c.rarity_icon || emoji}</div>
+            <div class="admin-row-body">
+              <div class="admin-row-title">${escHtml(c.name)}</div>
+              <div class="admin-row-sub">#${c.id} · ${escHtml(c.rarity_name || c.rarity)}</div>
+            </div>
+            <button type="button" class="text-btn admin-edit-card" data-id="${c.id}">Изменить</button>
+          </div>`;
+        })
+        .join("");
+
+      list.querySelectorAll(".admin-edit-card").forEach((btn) => {
+        btn.addEventListener("click", () => openCardForm(+btn.dataset.id, cards));
+      });
+    }
+
+    const pages = Math.max(1, Math.ceil(adminCardsTotal / ADMIN_LIMIT));
+    document.getElementById("adminCardsPage").textContent =
+      `${adminCardsPage + 1} / ${pages}`;
+    document.getElementById("adminCardsPrev").disabled = adminCardsPage <= 0;
+    document.getElementById("adminCardsNext").disabled =
+      adminCardsPage >= pages - 1;
+  }
+
+  function openCardForm(cardId, cardsList) {
+    editingCardId = cardId;
+    showAdminSection("adminCardForm");
+    const title = document.getElementById("adminCardFormTitle");
+    const delBtn = document.getElementById("cfDelete");
+
+    if (cardId) {
+      title.textContent = "Изменить карточку #" + cardId;
+      delBtn.classList.remove("hidden");
+      const c = (cardsList || []).find((x) => x.id === cardId);
+      if (c) {
+        document.getElementById("cfName").value = c.name || "";
+        document.getElementById("cfRarity").value = c.rarity || "common";
+        document.getElementById("cfPhotoId").value = c.photo_id || "";
+        document.getElementById("cfPhotoPath").value = c.photo_path || "";
+      } else {
+        // load single
+        api("/api/admin/cards?q=" + cardId).then((d) => {
+          const found = (d.cards || []).find((x) => x.id === cardId);
+          if (found) {
+            document.getElementById("cfName").value = found.name || "";
+            document.getElementById("cfRarity").value = found.rarity || "common";
+            document.getElementById("cfPhotoId").value = found.photo_id || "";
+            document.getElementById("cfPhotoPath").value = found.photo_path || "";
+          }
+        });
+      }
+    } else {
+      title.textContent = "Новая карточка";
+      delBtn.classList.add("hidden");
+      document.getElementById("cfName").value = "";
+      document.getElementById("cfRarity").value = "common";
+      document.getElementById("cfPhotoId").value = "";
+      document.getElementById("cfPhotoPath").value = "";
+    }
+  }
+
+  async function saveCardForm(e) {
+    e.preventDefault();
+    const body = {
+      name: document.getElementById("cfName").value.trim(),
+      rarity: document.getElementById("cfRarity").value,
+      photo_id: document.getElementById("cfPhotoId").value.trim() || null,
+      photo_path: document.getElementById("cfPhotoPath").value.trim() || null,
+    };
+    try {
+      if (editingCardId) {
+        await api("/api/admin/cards/" + editingCardId, {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        });
+        toast("Карточка обновлена");
+      } else {
+        await api("/api/admin/cards", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        toast("Карточка создана");
+      }
+      haptic("success");
+      showAdminSection("adminCards");
+      await loadAdminCards();
+    } catch (err) {
+      toast(err.message);
+      haptic("error");
+    }
+  }
+
+  async function deleteCard() {
+    if (!editingCardId) return;
+    if (!confirm("Удалить карточку #" + editingCardId + " и все записи в инвентарях?"))
+      return;
+    try {
+      await api("/api/admin/cards/" + editingCardId, { method: "DELETE" });
+      toast("Удалено");
+      haptic("success");
+      showAdminSection("adminCards");
+      await loadAdminCards();
+    } catch (err) {
+      toast(err.message);
+      haptic("error");
+    }
+  }
+
+  async function loadAdminUsers() {
+    const q = document.getElementById("adminUserSearch").value.trim();
+    const role = document.getElementById("adminUserRole").value;
+    const params = new URLSearchParams({
+      page: String(adminUsersPage),
+      limit: String(ADMIN_LIMIT),
+    });
+    if (q) params.set("q", q);
+    if (role) params.set("role", role);
+
+    const data = await api("/api/admin/users?" + params.toString());
+    adminUsersTotal = data.total || 0;
+    const list = document.getElementById("adminUsersList");
+    const users = data.users || [];
+
+    if (!users.length) {
+      list.innerHTML = '<div class="empty-state"><p>Никого не найдено</p></div>';
+    } else {
+      list.innerHTML = users
+        .map(
+          (u) => `
+        <div class="admin-row" data-id="${u.user_id}">
+          <div class="admin-row-icon">${(u.role_display || "").split(" ")[0] || "👤"}</div>
+          <div class="admin-row-body">
+            <div class="admin-row-title">${escHtml(u.nickname)}</div>
+            <div class="admin-row-sub">ID ${u.user_id} · ${fmt(u.coins)} 🪙 · 🔥${u.streak}</div>
+          </div>
+        </div>`
+        )
+        .join("");
+
+      list.querySelectorAll(".admin-row").forEach((el) => {
+        el.addEventListener("click", () => openUserDetail(+el.dataset.id));
+      });
+    }
+
+    const pages = Math.max(1, Math.ceil(adminUsersTotal / ADMIN_LIMIT));
+    document.getElementById("adminUsersPage").textContent =
+      `${adminUsersPage + 1} / ${pages}`;
+    document.getElementById("adminUsersPrev").disabled = adminUsersPage <= 0;
+    document.getElementById("adminUsersNext").disabled =
+      adminUsersPage >= pages - 1;
+  }
+
+  async function openUserDetail(userId) {
+    adminUserDetailId = userId;
+    showAdminSection("adminUserDetail");
+    const body = document.getElementById("adminUserBody");
+    body.innerHTML = '<div class="empty-state"><p>Загрузка…</p></div>';
+    try {
+      const u = await api("/api/admin/users/" + userId);
+      body.innerHTML = `
+        <div class="admin-user-card">
+          <h3>${escHtml(u.nickname)}</h3>
+          <div class="admin-user-meta">
+            <div>ID: <b>${u.user_id}</b></div>
+            <div>Роль: ${escHtml(u.role_display)}</div>
+            <div>Пол: ${escHtml(u.gender_display)}</div>
+            <div>Регистрация: ${escHtml(u.registration_str)}</div>
+            <div>Дней с нами: ${u.days_with_us}</div>
+            <div>Монеты: <b>${fmt(u.coins)}</b> 🪙</div>
+            <div>Стрик: <b>${u.streak}</b> 🔥</div>
+            <div>Карточек (уник.): <b>${u.cards_unique}</b></div>
+          </div>
+          <div class="admin-form" style="margin-top:12px">
+            <label>Ник
+              <input type="text" id="auNick" class="admin-input" value="${escAttr(u.nickname)}" maxlength="32" />
+            </label>
+            <label>Монеты
+              <input type="number" id="auCoins" class="admin-input" value="${u.coins}" min="0" />
+            </label>
+            <label>Стрик
+              <input type="number" id="auStreak" class="admin-input" value="${u.streak}" min="0" />
+            </label>
+            <label>Роль
+              <select id="auRole" class="admin-select">
+                <option value="user" ${u.role === "user" ? "selected" : ""}>Пользователь</option>
+                <option value="admin" ${u.role === "admin" ? "selected" : ""}>Админ</option>
+                <option value="superadmin" ${u.role === "superadmin" ? "selected" : ""}>Суперадмин</option>
+                <option value="banned" ${u.role === "banned" ? "selected" : ""}>Бан</option>
+              </select>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="auResetCd" /> Сбросить кулдаун
+            </label>
+            <div class="form-actions">
+              <button type="button" id="auSave" class="claim-btn small">Сохранить</button>
+            </div>
+          </div>
+          <div class="section-title" style="margin-top:16px">Выдать карточку</div>
+          <div class="admin-form">
+            <label>ID карточки
+              <input type="number" id="auGiveId" class="admin-input" min="1" />
+            </label>
+            <label>Количество
+              <input type="number" id="auGiveAmt" class="admin-input" value="1" min="1" max="100" />
+            </label>
+            <button type="button" id="auGive" class="claim-btn small">Выдать</button>
+          </div>
+          <div class="section-title" style="margin-top:16px">Инвентарь (последние)</div>
+          <div class="admin-log">
+            ${(u.inventory || [])
+              .map(
+                (c) => `
+              <div class="admin-log-row">
+                <div class="body">${c.rarity_icon || ""} ${escHtml(c.name)} ${
+                  c.amount > 1 ? "×" + c.amount : ""
+                }</div>
+              </div>`
+              )
+              .join("") || '<div class="empty-state"><p>Пусто</p></div>'}
+          </div>
+        </div>`;
+
+      document.getElementById("auSave").addEventListener("click", async () => {
+        const payload = {
+          nickname: document.getElementById("auNick").value.trim(),
+          coins: +document.getElementById("auCoins").value,
+          streak: +document.getElementById("auStreak").value,
+          role: document.getElementById("auRole").value,
+        };
+        if (document.getElementById("auResetCd").checked) {
+          payload.reset_cooldown = true;
+        }
+        try {
+          await api("/api/admin/users/" + userId, {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          });
+          toast("Сохранено");
+          haptic("success");
+          openUserDetail(userId);
+        } catch (err) {
+          toast(err.message);
+          haptic("error");
+        }
+      });
+
+      document.getElementById("auGive").addEventListener("click", async () => {
+        const card_id = +document.getElementById("auGiveId").value;
+        const amount = +document.getElementById("auGiveAmt").value || 1;
+        if (!card_id) {
+          toast("Укажи ID карточки");
+          return;
+        }
+        try {
+          const res = await api("/api/admin/users/" + userId + "/give-card", {
+            method: "POST",
+            body: JSON.stringify({ card_id, amount }),
+          });
+          toast(`Выдано: ${res.card?.name || card_id}`);
+          haptic("success");
+          openUserDetail(userId);
+        } catch (err) {
+          toast(err.message);
+          haptic("error");
+        }
+      });
+    } catch (e) {
+      body.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`;
+    }
+  }
+
+  function renderAdmin() {
+    renderAdminOverview();
   }
 
   // ── Modal ──
@@ -629,7 +943,6 @@
       `${card.rarity_icon || ""} ${card.rarity_name || card.rarity}`;
     const parts = [];
     if (card.reward) parts.push(`Награда: +${card.reward} 🪙`);
-    if (card.amount) parts.push(`У вас: ×${card.amount}`);
     document.getElementById("modalMeta").textContent = parts.join(" · ");
     document.getElementById("cardModal").classList.add("open");
     haptic("light");
@@ -644,18 +957,12 @@
     me = await api("/api/me");
     renderHeader();
     renderProfile();
-    ensureAdminNav();
   }
 
   async function loadCollection() {
     collection = await api("/api/collection");
     renderRarityFilters();
     renderCollection();
-  }
-
-  async function loadMarket() {
-    market = await api("/api/market");
-    renderMarket();
   }
 
   async function loadTop() {
@@ -672,15 +979,13 @@
     try {
       hideFatal();
       await loadMe();
-      await Promise.all([loadCollection(), loadMarket(), loadTop()]);
-      if (me && isAdminRole(me.role)) {
-        loadAdmin().catch(() => {});
-      }
+      await Promise.all([loadCollection(), loadTop()]);
+      updateClaimUI();
     } catch (e) {
       console.error(e);
       const msg = e.message || "Не удалось загрузить данные";
       const steps = [];
-      if (!API_BASE) {
+      if (!API_BASE || API_BASE.includes("YOUR-API-HOST")) {
         steps.push(
           'В <code>index.html</code> задай <code>window.MEOW_API_BASE = "https://…"</code>'
         );
@@ -695,78 +1000,79 @@
     }
   }
 
-  async function doExchange(amount) {
-    try {
-      const res = await api("/api/market/exchange", {
-        method: "POST",
-        body: JSON.stringify({ amount }),
-      });
-      toast(`✓ +${amount} 💎`);
-      haptic("success");
-      me.coins = res.coins;
-      me.gems = res.gems;
-      renderHeader();
-      renderProfile();
-      await loadMarket();
-    } catch (e) {
-      toast(e.message || "Ошибка обмена");
-      haptic("error");
-    }
-  }
-
   function switchTab(tab) {
+    // page panels (help/admin) hide bottom nav conceptually but keep it
     document
       .querySelectorAll(".tab-panel")
       .forEach((p) => p.classList.remove("active"));
     document
       .querySelectorAll(".nav-btn")
       .forEach((b) => b.classList.remove("active"));
-    document.querySelector(`.tab-panel[data-tab="${tab}"]`)?.classList.add("active");
-    document.querySelector(`.nav-btn[data-tab="${tab}"]`)?.classList.add("active");
+
+    const panel = document.querySelector(`.tab-panel[data-tab="${tab}"]`);
+    panel?.classList.add("active");
+
+    if (["cards", "claim", "top", "profile"].includes(tab)) {
+      document.querySelector(`.nav-btn[data-tab="${tab}"]`)?.classList.add("active");
+      previousTab = tab;
+    }
+
     haptic("light");
 
-    if (tab === "collection") {
+    if (tab === "cards") {
       if (!collection) loadCollection().catch((e) => toast(e.message));
       else {
         renderRarityFilters();
         renderCollection();
       }
-    } else if (tab === "market") {
-      showMarketList();
-      if (!market) loadMarket().catch((e) => toast(e.message));
-      else renderMarket();
+    } else if (tab === "claim") {
+      updateClaimUI();
     } else if (tab === "top") {
       if (!topData) loadTop().catch((e) => toast(e.message));
       else renderTop();
     } else if (tab === "profile") {
       renderProfile();
+    } else if (tab === "help") {
+      loadHelp();
     } else if (tab === "admin") {
       if (!me || !isAdminRole(me.role)) {
         toast("Недостаточно прав");
         switchTab("profile");
         return;
       }
+      showAdminSection("adminOverview");
+      document
+        .querySelectorAll(".admin-tab")
+        .forEach((t) => t.classList.toggle("active", t.dataset.admin === "overview"));
       if (!adminData) loadAdmin().catch((e) => toast(e.message));
       else renderAdmin();
     }
   }
 
-  // Events
+  // ── Events ──
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+
+  document.getElementById("helpBtn").addEventListener("click", () => {
+    switchTab("help");
+  });
+
+  document.querySelectorAll(".back-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      switchTab(btn.dataset.back || previousTab || "profile");
+    });
   });
 
   document.querySelectorAll(".action-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const action = btn.dataset.action;
-      if (action === "claim") {
-        toast("🃏 Напиши «мряу» в чате с ботом, чтобы получить карточку");
-        haptic("light");
-      } else if (action === "dice") {
+      if (action === "claim") switchTab("claim");
+      else if (action === "dice") {
         toast("🎲 Напиши «мряу кубик» в чате с ботом");
         haptic("light");
-      } else if (action === "market") switchTab("market");
-      else if (action === "top") switchTab("top");
+      } else if (action === "top") switchTab("top");
+      else if (action === "cards") switchTab("cards");
     });
   });
 
@@ -786,44 +1092,120 @@
     });
   });
 
-  document.querySelectorAll(".ex-btn").forEach((btn) => {
-    btn.addEventListener("click", () => doExchange(+btn.dataset.amount));
-  });
+  document.getElementById("claimBtn").addEventListener("click", doClaim);
+  document.getElementById("claimAgainBtn").addEventListener("click", closeClaimResult);
 
   document.getElementById("modalClose").addEventListener("click", closeCardModal);
   document
     .querySelector(".modal-backdrop")
     .addEventListener("click", closeCardModal);
 
-  document.getElementById("browserClose").addEventListener("click", () => {
-    showMarketList();
-    haptic("light");
-  });
-  document.getElementById("browserPrev").addEventListener("click", async () => {
-    if (browserPage > 0) {
-      browserPage -= 1;
-      await loadBrowserPage();
-      haptic("light");
+  // Double-tap profile → admin
+  let lastProfileTap = 0;
+  document.getElementById("profileCard")?.addEventListener("click", () => {
+    const now = Date.now();
+    if (now - lastProfileTap < 400) {
+      if (me && isAdminRole(me.role)) {
+        switchTab("admin");
+        haptic("success");
+      }
     }
+    lastProfileTap = now;
   });
-  document.getElementById("browserNext").addEventListener("click", async () => {
-    if (browserData && browserPage < (browserData.total || 0) - 1) {
-      browserPage += 1;
-      await loadBrowserPage();
+
+  // Admin tabs
+  document.querySelectorAll(".admin-tab").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      document
+        .querySelectorAll(".admin-tab")
+        .forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const name = btn.dataset.admin;
+      if (name === "overview") {
+        showAdminSection("adminOverview");
+        if (!adminData) await loadAdmin().catch((e) => toast(e.message));
+        else renderAdminOverview();
+      } else if (name === "cards") {
+        showAdminSection("adminCards");
+        adminCardsPage = 0;
+        await loadAdminCards().catch((e) => toast(e.message));
+      } else if (name === "users") {
+        showAdminSection("adminUsers");
+        adminUsersPage = 0;
+        await loadAdminUsers().catch((e) => toast(e.message));
+      }
       haptic("light");
-    }
+    });
   });
-  document.getElementById("browserBuy").addEventListener("click", doBuyCurrent);
 
   document.getElementById("adminRefresh")?.addEventListener("click", async () => {
     try {
       await loadAdmin();
-      toast("Админ-данные обновлены");
+      toast("Обновлено");
       haptic("success");
     } catch (e) {
       toast(e.message);
       haptic("error");
     }
+  });
+
+  document.getElementById("adminCardAdd")?.addEventListener("click", () => {
+    openCardForm(null);
+  });
+
+  document.getElementById("cardForm")?.addEventListener("submit", saveCardForm);
+  document.getElementById("cfDelete")?.addEventListener("click", deleteCard);
+  document.getElementById("adminCardFormBack")?.addEventListener("click", () => {
+    showAdminSection("adminCards");
+  });
+
+  let cardSearchT;
+  document.getElementById("adminCardSearch")?.addEventListener("input", () => {
+    clearTimeout(cardSearchT);
+    cardSearchT = setTimeout(() => {
+      adminCardsPage = 0;
+      loadAdminCards().catch((e) => toast(e.message));
+    }, 300);
+  });
+  document.getElementById("adminCardRarity")?.addEventListener("change", () => {
+    adminCardsPage = 0;
+    loadAdminCards().catch((e) => toast(e.message));
+  });
+  document.getElementById("adminCardsPrev")?.addEventListener("click", () => {
+    if (adminCardsPage > 0) {
+      adminCardsPage--;
+      loadAdminCards().catch((e) => toast(e.message));
+    }
+  });
+  document.getElementById("adminCardsNext")?.addEventListener("click", () => {
+    adminCardsPage++;
+    loadAdminCards().catch((e) => toast(e.message));
+  });
+
+  let userSearchT;
+  document.getElementById("adminUserSearch")?.addEventListener("input", () => {
+    clearTimeout(userSearchT);
+    userSearchT = setTimeout(() => {
+      adminUsersPage = 0;
+      loadAdminUsers().catch((e) => toast(e.message));
+    }, 300);
+  });
+  document.getElementById("adminUserRole")?.addEventListener("change", () => {
+    adminUsersPage = 0;
+    loadAdminUsers().catch((e) => toast(e.message));
+  });
+  document.getElementById("adminUsersPrev")?.addEventListener("click", () => {
+    if (adminUsersPage > 0) {
+      adminUsersPage--;
+      loadAdminUsers().catch((e) => toast(e.message));
+    }
+  });
+  document.getElementById("adminUsersNext")?.addEventListener("click", () => {
+    adminUsersPage++;
+    loadAdminUsers().catch((e) => toast(e.message));
+  });
+  document.getElementById("adminUserBack")?.addEventListener("click", () => {
+    showAdminSection("adminUsers");
   });
 
   document.getElementById("fatalRetry").addEventListener("click", () => {
@@ -835,8 +1217,8 @@
     toast("Обновление…");
   });
 
-  // Start: setup checks first, then load
-  if (!API_BASE) {
+  // Start
+  if (!API_BASE || API_BASE.includes("YOUR-API-HOST")) {
     showFatal("API не настроен", "Адрес сервера не указан.", [
       'В <code>index.html</code> добавь:<br><code>window.MEOW_API_BASE = "https://твой-api.ru";</code>',
       "Задеплой фронт и открой из Telegram",
