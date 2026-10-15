@@ -17,9 +17,9 @@
 
   const tg = window.Telegram?.WebApp;
   if (tg) {
-    tg.ready();
-    tg.expand();
     try {
+      tg.ready();
+      tg.expand();
       tg.setHeaderColor("#1a1d28");
       tg.setBackgroundColor("#12141c");
     } catch (_) {}
@@ -33,7 +33,7 @@
     rarityFilter: null,
     topKind: "coins",
     top: null,
-    profileTarget: null, // user_id or null (= me)
+    profileTarget: null,
     profileData: null,
     viewingOther: false,
   };
@@ -43,7 +43,19 @@
 
   // ── API ─────────────────────────────────────────────────────────────────
   function getInitData() {
-    return tg?.initData || "";
+    // initData появляется только внутри Telegram
+    const raw = (tg && tg.initData) || "";
+    return typeof raw === "string" ? raw : "";
+  }
+
+  async function waitForInitData(maxMs = 2500) {
+    const start = Date.now();
+    while (Date.now() - start < maxMs) {
+      const d = getInitData();
+      if (d && d.includes("hash=")) return d;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return getInitData();
   }
 
   async function api(path, opts = {}) {
@@ -54,8 +66,9 @@
     };
     const initData = getInitData();
     if (initData) {
-      headers["Authorization"] = `tma ${initData}`;
+      // X-Telegram-Init-Data надёжнее: Authorization иногда режется прокси
       headers["X-Telegram-Init-Data"] = initData;
+      headers["Authorization"] = `tma ${initData}`;
     }
 
     const res = await fetch(url, { ...opts, headers });
@@ -63,9 +76,9 @@
       let detail = res.statusText;
       try {
         const j = await res.json();
-        detail = j.detail || detail;
+        detail = j.detail || j.error || detail;
       } catch (_) {}
-      const err = new Error(detail);
+      const err = new Error(String(detail));
       err.status = res.status;
       throw err;
     }
@@ -98,7 +111,15 @@
   // ── Header ──────────────────────────────────────────────────────────────
   function updateHeader() {
     const me = state.me;
-    if (!me) return;
+    if (!me) {
+      const c = $("#hdr-coins .val");
+      const s = $("#hdr-streak .val");
+      const n = $("#hdr-name");
+      if (c) c.textContent = "—";
+      if (s) s.textContent = "—";
+      if (n) n.textContent = "…";
+      return;
+    }
     $("#hdr-coins .val").textContent = fmt(me.coins);
     $("#hdr-streak .val").textContent = fmt(me.streak);
     $("#hdr-name").textContent = me.nickname || "…";
@@ -325,7 +346,10 @@
 
   // ── Profile tab ─────────────────────────────────────────────────────────
   async function loadProfile(userId) {
-    if (!userId || userId === state.me?.user_id) {
+    if (!state.me) {
+      throw new Error("Сначала нужна авторизация");
+    }
+    if (!userId || userId === state.me.user_id) {
       state.profileData = { ...state.me, is_own: true };
       state.viewingOther = false;
       return;
@@ -431,34 +455,71 @@
 
   // ── Init ────────────────────────────────────────────────────────────────
   async function init() {
-    // modal close
     $$("[data-close]").forEach((el) => el.addEventListener("click", closeModal));
 
     $$(".tab").forEach((el) => {
       el.addEventListener("click", () => {
+        if (!state.me) return;
         const tab = el.dataset.tab;
         if (tab === state.tab && !state.viewingOther) return;
         switchTab(tab);
       });
     });
 
-    if (!getInitData() && !location.search.includes("debug")) {
-      // вне Telegram — предупреждение
-      showError("Откройте мини-приложение из Telegram-бота «Мряу».");
+    showLoader();
+
+    // ждём initData (иногда появляется с задержкой после tg.ready)
+    const initData = await waitForInitData(2500);
+    console.log("[mryau] API_BASE=", API_BASE, "initData_len=", initData?.length || 0);
+
+    if (!initData && !location.search.includes("debug")) {
+      showError(
+        "Откройте мини-приложение из Telegram-бота «Мряу».\n\n" +
+          "initData пустой — страница открыта не через WebApp."
+      );
       return;
     }
 
-    showLoader();
+    if (!API_BASE) {
+      console.warn("[mryau] window.__API_BASE__ не задан — запросы на same-origin");
+    }
+
     try {
+      // быстрая диагностика
+      try {
+        const check = await api("/api/auth-check");
+        console.log("[mryau] auth-check", check);
+      } catch (e) {
+        console.warn("[mryau] auth-check failed", e.message);
+      }
+
       state.me = await api("/api/me");
       updateHeader();
       await switchTab("cards");
     } catch (e) {
-      console.error(e);
+      console.error("[mryau] init error", e);
+      state.me = null;
+      updateHeader();
       if (e.status === 403) {
         showError("Доступ ограничен. Вы заблокированы.");
       } else if (e.status === 401) {
-        showError("Не удалось авторизоваться. Перезапустите мини-приложение.");
+        const msg = String(e.message || "");
+        if (msg.includes("invalid_signature")) {
+          showError(
+            "Ошибка подписи (invalid_signature).\n\n" +
+              "BOT_TOKEN на API должен быть токеном того же бота, " +
+              "к которому привязано мини-приложение (не admin-бот).\n\n" +
+              "Проверьте .env на BotHost и перезапустите API."
+          );
+        } else if (msg.includes("expired")) {
+          showError("Сессия устарела. Закройте и снова откройте мини-приложение.");
+        } else {
+          showError(
+            "Не удалось авторизоваться (" +
+              msg +
+              ").\n\nПерезапустите мини-приложение из бота."
+          );
+        }
       } else {
         showError(e.message || "Ошибка соединения с сервером");
       }
