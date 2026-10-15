@@ -42,8 +42,9 @@
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
   // ── API ─────────────────────────────────────────────────────────────────
+  let sessionToken = null;
+
   function getInitData() {
-    // initData появляется только внутри Telegram
     const raw = (tg && tg.initData) || "";
     return typeof raw === "string" ? raw : "";
   }
@@ -64,11 +65,13 @@
       Accept: "application/json",
       ...(opts.headers || {}),
     };
-    const initData = getInitData();
-    if (initData) {
-      // X-Telegram-Init-Data надёжнее: Authorization иногда режется прокси
-      headers["X-Telegram-Init-Data"] = initData;
-      headers["Authorization"] = `tma ${initData}`;
+    if (opts.body && typeof opts.body === "object" && !(opts.body instanceof FormData)) {
+      headers["Content-Type"] = "application/json";
+      opts = { ...opts, body: JSON.stringify(opts.body) };
+    }
+    // После /api/auth используем короткий Bearer — не режется прокси
+    if (sessionToken) {
+      headers["Authorization"] = `Bearer ${sessionToken}`;
     }
 
     const res = await fetch(url, { ...opts, headers });
@@ -83,6 +86,27 @@
       throw err;
     }
     return res.json();
+  }
+
+  /** Обмен initData (в body) на session token */
+  async function loginWithInitData(initData) {
+    const res = await fetch(`${API_BASE}/api/auth`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ initData }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.detail || data.error || res.statusText);
+      err.status = res.status;
+      err.payload = data;
+      throw err;
+    }
+    sessionToken = data.token;
+    return data;
   }
 
   function photoUrl(card) {
@@ -468,9 +492,15 @@
 
     showLoader();
 
-    // ждём initData (иногда появляется с задержкой после tg.ready)
     const initData = await waitForInitData(2500);
-    console.log("[mryau] API_BASE=", API_BASE, "initData_len=", initData?.length || 0);
+    console.log(
+      "[mryau] API_BASE=",
+      API_BASE,
+      "initData_len=",
+      initData?.length || 0,
+      "platform=",
+      tg?.platform
+    );
 
     if (!initData && !location.search.includes("debug")) {
       showError(
@@ -481,24 +511,22 @@
     }
 
     if (!API_BASE) {
-      console.warn("[mryau] window.__API_BASE__ не задан — запросы на same-origin");
+      console.warn("[mryau] window.__API_BASE__ не задан — запросы идут на same-origin");
     }
 
     try {
-      // быстрая диагностика
-      try {
-        const check = await api("/api/auth-check");
-        console.log("[mryau] auth-check", check);
-      } catch (e) {
-        console.warn("[mryau] auth-check failed", e.message);
-      }
+      // 1) initData → session token (POST body, не заголовок)
+      const auth = await loginWithInitData(initData);
+      console.log("[mryau] auth OK", auth.user_id);
 
+      // 2) дальше все запросы с коротким Bearer
       state.me = await api("/api/me");
       updateHeader();
       await switchTab("cards");
     } catch (e) {
-      console.error("[mryau] init error", e);
+      console.error("[mryau] init error", e, e.payload);
       state.me = null;
+      sessionToken = null;
       updateHeader();
       if (e.status === 403) {
         showError("Доступ ограничен. Вы заблокированы.");
@@ -507,11 +535,12 @@
         if (msg.includes("invalid_signature")) {
           showError(
             "Ошибка подписи (invalid_signature).\n\n" +
-              "BOT_TOKEN на API должен быть токеном того же бота, " +
-              "к которому привязано мини-приложение (не admin-бот).\n\n" +
-              "Проверьте .env на BotHost и перезапустите API."
+              "1) BOT_TOKEN у API = токен user-бота\n" +
+              "2) В BotFather Web App привязан к этому же боту\n" +
+              "3) API перезапущен после смены .env\n\n" +
+              "В логах API смотрите строку POST /api/auth failed."
           );
-        } else if (msg.includes("expired")) {
+        } else if (msg.includes("expired") || msg.includes("session")) {
           showError("Сессия устарела. Закройте и снова откройте мини-приложение.");
         } else {
           showError(
@@ -521,7 +550,10 @@
           );
         }
       } else {
-        showError(e.message || "Ошибка соединения с сервером");
+        showError(
+          (e.message || "Ошибка соединения") +
+            (API_BASE ? "" : "\n\nНе задан window.__API_BASE__")
+        );
       }
     }
   }
