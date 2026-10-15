@@ -5,11 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Мряу</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="/static/app.css" />
+  <!--
+    URL API на BotHost. Можно задать здесь ИЛИ в config.js:
+    <script>window.MRYAU_API_BASE = "https://ВАШ-БОТ-НА-BOTHOST";</script>
+  -->
+  <script src="./config.js"></script>
+  <link rel="stylesheet" href="./static/app.css" />
 </head>
 <body>
   <div id="app">
-    <!-- Header -->
     <header class="header" id="header">
       <div class="header-brand">
         <span class="logo">🃏</span>
@@ -27,9 +31,7 @@
       </div>
     </header>
 
-    <!-- Main content -->
     <main class="main" id="main">
-      <!-- Cards tab -->
       <section class="tab-panel active" id="panel-cards" data-tab="cards">
         <div class="section-head">
           <h2>Мои карточки</h2>
@@ -41,7 +43,6 @@
         </div>
       </section>
 
-      <!-- Top tab -->
       <section class="tab-panel" id="panel-top" data-tab="top">
         <div class="section-head">
           <h2>Топ игроков</h2>
@@ -57,14 +58,12 @@
         <div class="my-rank" id="my-rank"></div>
       </section>
 
-      <!-- Profile tab -->
       <section class="tab-panel" id="panel-profile" data-tab="profile">
         <div id="profile-content">
           <div class="loader">Загрузка…</div>
         </div>
       </section>
 
-      <!-- Other user profile (overlay) -->
       <section class="tab-panel" id="panel-other" data-tab="other" hidden>
         <div class="section-head row">
           <button class="btn-back" id="btn-back-other">‹ Назад</button>
@@ -76,7 +75,6 @@
       </section>
     </main>
 
-    <!-- Bottom nav -->
     <nav class="bottom-nav" id="bottom-nav">
       <button class="nav-btn active" data-tab="cards">
         <span class="nav-icon">🃏</span>
@@ -93,7 +91,6 @@
     </nav>
   </div>
 
-  <!-- Card modal -->
   <div class="modal" id="card-modal" hidden>
     <div class="modal-backdrop" id="modal-backdrop"></div>
     <div class="modal-sheet">
@@ -110,6 +107,6 @@
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="./static/app.js"></script>
 </body>
 </html>

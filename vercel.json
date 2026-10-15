@@ -1,10 +1,21 @@
 {
+  "version": 2,
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    { "source": "/((?!static|config\\.js).*)", "destination": "/index.html" }
+  ],
   "headers": [
+    {
+      "source": "/static/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400" }
+      ]
+    },
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Frame-Options", "value": "ALLOWALL" },
-        { "key": "Content-Security-Policy", "value": "frame-ancestors 'self' https://web.telegram.org https://*.telegram.org" }
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
       ]
     }
   ]
