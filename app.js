@@ -1,11 +1,3 @@
-/**
- * Мряу Mini App
- * Hosted on Vercel. API on BotHost.
- *
- * Env (build-time via window or meta):
- *   window.__API_BASE__  — e.g. https://your-bot.bothost.io
- * Or set in vercel.json / index as fallback.
- */
 (function () {
   "use strict";
 
