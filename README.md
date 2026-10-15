@@ -1,130 +1,60 @@
-# Мряу Mini App v2
+# Мряу — Telegram Mini App (Vercel)
 
-Мини-приложение читает профиль, карточки, топ и выдаёт бесплатную карточку из той же SQLite, что и бот.
+Фронтенд мини-приложения. API живёт на BotHost вместе с ботом.
 
-```
-Telegram → Mini App (HTML на Vercel / GitHub Pages)
-                ↓ HTTPS + initData
-         api.py (FastAPI на VPS / Bothost рядом с ботом)
-                ↓
-         cards_game.db
-```
-
-## Вкладки
-
-| Вкладка | Описание |
-|---------|----------|
-| **Карточки** | Коллекция (уникальные, без ×amount) |
-| **Получить** | Бесплатная карточка / таймер кулдауна 4 ч |
-| **Топ** | Монеты · уникальные карточки · стрик |
-| **Профиль** | Ник, карточки, стрик, дни |
-
-- **Помощь** — иконка ❓ справа в шапке
-- **Админка** — двойной тап по карточке профиля (только admin/superadmin)
-
-Маркет и кристаллы **удалены**.
-
----
-
-## 1. API (на сервере бота)
-
-Положи обновлённый `api.py` в корень репозитория бота (рядом с ботом и БД).
-
-```bash
-pip install fastapi uvicorn aiosqlite pydantic
-
-export BOT_TOKEN="123456:ABC..."
-export DB_NAME="/app/data/cards_game.db"
-export CORS_ORIGINS="https://твой-фронт.vercel.app,https://web.telegram.org"
-export API_PORT=8080   # или PORT на Bothost
-
-uvicorn api:app --host 0.0.0.0 --port 8080
-```
-
-Или через `run_bot_and_api.py` (бот + API в одном процессе).
-
-Проверка: `curl https://твой-api/health`
-
-### Новые эндпоинты
-
-| Метод | Путь | Описание |
-|-------|------|----------|
-| POST | `/api/claim` | Получить бесплатную карточку |
-| GET | `/api/help` | Справка (без auth) |
-| GET/POST/PATCH/DELETE | `/api/admin/cards` | CRUD карточек |
-| GET/PATCH | `/api/admin/users` | Игроки |
-| POST | `/api/admin/users/{id}/give-card` | Выдать карточку |
-
-Удалены: `/api/market*`, gems, exchange, buy.
-
-Заголовок для `/api/*` (кроме `/api/help` и фото):
+## Структура
 
 ```
-X-Telegram-Init-Data: <tg.initData>
+miniapp/
+  index.html
+  styles.css
+  app.js
+  vercel.json
+  README.md
 ```
 
----
+## Настройка
 
-## 2. Фронтенд
+1. Создайте репозиторий и задеплойте на Vercel.
+2. Укажите URL API бота. Два варианта:
 
-В `index.html`:
+### Вариант A — в `index.html` перед `app.js`
 
 ```html
 <script>
-  window.MEOW_API_BASE = "https://api.example.com";
+  window.__API_BASE__ = "https://YOUR-BOTHOST-DOMAIN";
 </script>
+<script src="app.js"></script>
 ```
 
-Залей папку на **Vercel** или **GitHub Pages**.
+### Вариант B — meta-тег
 
-**Vercel:** New Project → загрузить папку → Framework Other → Deploy.
-
-**GitHub Pages:** push → Settings → Pages → branch main / root.
-
----
-
-## 3. Кнопка в боте (aiogram 3)
-
-```python
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-
-WEBAPP_URL = "https://meow-xxx.vercel.app"
-
-def webapp_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="🃏 Открыть мини-аппку",
-            web_app=WebAppInfo(url=WEBAPP_URL),
-        )
-    ]])
+```html
+<meta name="api-base" content="https://YOUR-BOTHOST-DOMAIN" />
 ```
 
-Или Menu Button в BotFather → URL фронта.
+3. В BotFather / настройках бота:
+   - Menu Button → Web App URL = `https://your-app.vercel.app`
+   - или `WEBAPP_URL` / deep-link `?startapp` уже в боте.
 
----
+4. На API (BotHost) в `.env`:
 
-## Файлы (только фронт)
-
-```
-meow-miniapp/
-├── index.html
-├── styles.css
-├── app.js
-├── vercel.json
-└── README.md
+```env
+START_API=1
+BOT_TOKEN=...
+CORS_ORIGINS=https://your-app.vercel.app,https://*.vercel.app
 ```
 
-`api.py` лежит в **проекте бота**, не здесь.
+`CORS_ORIGINS=*` тоже работает для теста.
 
----
+## Вкладки
 
-## Проблемы
+| Вкладка    | Содержимое |
+|------------|------------|
+| Карточки   | Свои карточки, фильтр по редкости, просмотр фото |
+| Топ        | Монеты / карточки / стрик. Клик по игроку → его профиль |
+| Профиль    | Монеты, кол-во карточек, стрик. Чужие карточки не показываются |
 
-| Симптом | Что сделать |
-|---------|-------------|
-| API не настроен | `window.MEOW_API_BASE` в index.html |
-| Открой из Telegram | Кнопка Web App в боте |
-| 401 подпись | BOT_TOKEN API = токен того же бота |
-| CORS | Домен фронта в CORS_ORIGINS |
-| Нет HTTPS | Telegram не пустит запросы |
-| Админка не открывается | Нужна роль admin/superadmin + двойной тап по профилю |
+## Локальная проверка
+
+Откройте из Telegram (initData обязателен). Без Telegram API вернёт 401.
