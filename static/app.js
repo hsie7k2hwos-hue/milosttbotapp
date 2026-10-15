@@ -16,7 +16,23 @@
     } catch (_) {}
   }
 
-  const API = ""; // same origin
+  /**
+   * API на BotHost (отдельный хост от Vercel).
+   * Приоритет: window.MRYAU_API_BASE → meta → ?api=
+   */
+  function resolveApiBase() {
+    const fromWindow = (window.MRYAU_API_BASE || "").trim().replace(/\/+$/, "");
+    if (fromWindow) return fromWindow;
+    const meta = document.querySelector('meta[name="mryau-api"]');
+    if (meta && meta.content) return meta.content.trim().replace(/\/+$/, "");
+    try {
+      const q = new URLSearchParams(location.search).get("api");
+      if (q) return q.trim().replace(/\/+$/, "");
+    } catch (_) {}
+    return "";
+  }
+
+  const API = resolveApiBase();
   let initData = tg?.initData || "";
   let me = null;
   let currentRarity = "all";
@@ -35,19 +51,33 @@
   }
 
   async function api(path, opts = {}) {
+    if (!API) {
+      throw new Error(
+        "Не задан URL API. Укажите window.MRYAU_API_BASE в config.js (адрес BotHost)."
+      );
+    }
     const res = await fetch(API + path, {
       ...opts,
       headers: { ...authHeaders(), ...(opts.headers || {}) },
+      mode: "cors",
     });
     if (!res.ok) {
       let detail = res.statusText;
       try {
         const j = await res.json();
-        detail = j.detail || JSON.stringify(j);
+        detail = j.detail || (j.error && j.error.message) || JSON.stringify(j);
       } catch (_) {}
       throw new Error(detail || "Ошибка " + res.status);
     }
     return res.json();
+  }
+
+  /** Относительный /api/card-photo/... → абсолютный URL на BotHost */
+  function absUrl(u) {
+    if (!u) return null;
+    if (/^https?:\/\//i.test(u)) return u;
+    if (u.startsWith("/") && API) return API + u;
+    return u;
   }
 
   // ── Format helpers ──────────────────────────────────────────────────────
@@ -149,13 +179,14 @@
       return;
     }
     grid.innerHTML = cards
-      .map(
-        (c) => `
+      .map((c) => {
+        const photo = absUrl(c.photo_url);
+        return `
       <article class="card-item" data-rarity="${esc(c.rarity)}" data-id="${c.id}">
         <div class="thumb">
           ${
-            c.photo_url
-              ? `<img src="${esc(c.photo_url)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" />
+            photo
+              ? `<img src="${esc(photo)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='block'" />
                  <span class="ph" style="display:none">🃏</span>`
               : `<span class="ph">🃏</span>`
           }
@@ -164,8 +195,8 @@
           <div class="name">${esc(c.name)}</div>
           <div class="rarity">${esc(c.rarity_icon)} ${esc(c.rarity_name)}</div>
         </div>
-      </article>`
-      )
+      </article>`;
+      })
       .join("");
 
     grid.querySelectorAll(".card-item").forEach((el) => {
@@ -189,8 +220,9 @@
     document.getElementById("modal-reward").textContent =
       rw < 0 ? `Штраф: −${fmtNum(Math.abs(rw))} 🪙` : `Награда: +${fmtNum(rw)} 🪙`;
 
-    if (card.photo_url) {
-      img.src = card.photo_url;
+    const photo = absUrl(card.photo_url);
+    if (photo) {
+      img.src = photo;
       img.hidden = false;
       ph.style.display = "none";
       img.onerror = () => {
@@ -336,12 +368,24 @@
   // ── Boot ────────────────────────────────────────────────────────────────
   async function boot() {
     if (!initData && location.search.includes("tgWebAppData")) {
-      // fallback for some clients
       try {
         const params = new URLSearchParams(location.hash.slice(1) || location.search);
         initData = params.get("tgWebAppData") || initData;
       } catch (_) {}
     }
+
+    if (!API) {
+      const grid = document.getElementById("cards-grid");
+      grid.innerHTML =
+        `<div class="error-box">Не задан URL API (BotHost).<br/>
+         Откройте <code>config.js</code> и укажите<br/>
+         <code>window.MRYAU_API_BASE = "https://…"</code></div>`;
+      document.getElementById("cards-summary").textContent = "";
+      console.error("MRYAU_API_BASE is empty");
+      return;
+    }
+
+    console.info("[mryau] API_BASE =", API);
 
     try {
       me = await api("/api/me");
