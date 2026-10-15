@@ -7,4 +7,4 @@
  * Без слэша в конце. Пример:
  *   window.MRYAU_API_BASE = "https://mryau-xxxx.bothost.ru";
  */
-window.MRYAU_API_BASE = "https://ЗАМЕНИТЕ-НА-URL-API-BOTHOST";
+window.MRYAU_API_BASE = "https://bot-1788312110-6885-chekinikita.bothost.tech/";
