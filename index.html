@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#000000" />
+  <title>Коллекция карточек</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+    <!-- Header glass -->
+    <header class="top-bar glass" id="topBar">
+      <div class="top-bar__left">
+        <span class="logo-mark">🃏</span>
+        <div class="top-bar__titles">
+          <h1 id="pageTitle">Коллекция</h1>
+          <p id="pageSubtitle" class="muted">Все карточки</p>
+        </div>
+      </div>
+      <div class="top-bar__right">
+        <button type="button" class="icon-btn glass-btn" id="themeToggle" aria-label="Тема" title="Тема">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- ── COLLECTION ── -->
+      <section class="page active" id="page-collection" data-page="collection">
+        <div class="filters-row">
+          <div class="chip-scroll" id="rarityChips"></div>
+          <div class="search-wrap glass">
+            <span class="search-icon">🔍</span>
+            <input type="search" id="searchInput" placeholder="Поиск карточки…" autocomplete="off" />
+          </div>
+        </div>
+        <div class="stats-strip glass" id="collectionStats">
+          <div class="stat"><span class="stat-val" id="statTotal">—</span><span class="stat-lbl">всего</span></div>
+          <div class="stat"><span class="stat-val" id="statShown">—</span><span class="stat-lbl">на экране</span></div>
+        </div>
+        <div class="card-grid" id="cardGrid"></div>
+        <div class="load-more-wrap">
+          <button type="button" class="btn glass-btn" id="loadMoreBtn" hidden>Ещё</button>
+        </div>
+        <div class="empty-state" id="collectionEmpty" hidden>
+          <div class="empty-icon">📭</div>
+          <p>Карточек не найдено</p>
+        </div>
+      </section>
+
+      <!-- ── TOP ── -->
+      <section class="page" id="page-top" data-page="top">
+        <div class="segmented glass" id="topKindTabs">
+          <button type="button" class="seg active" data-kind="coins">🪙 Монеты</button>
+          <button type="button" class="seg" data-kind="cards">🃏 Карты</button>
+          <button type="button" class="seg" data-kind="streak">🔥 Стрик</button>
+        </div>
+        <div class="top-list" id="topList"></div>
+        <div class="empty-state" id="topEmpty" hidden>
+          <div class="empty-icon">🏆</div>
+          <p>Пока пусто</p>
+        </div>
+      </section>
+
+      <!-- ── PROFILE ── -->
+      <section class="page" id="page-profile" data-page="profile">
+        <div class="profile-hero glass" id="profileHero">
+          <div class="avatar-ring">
+            <div class="avatar" id="profileAvatar">👤</div>
+          </div>
+          <h2 id="profileName">—</h2>
+          <p class="muted" id="profileMeta">загрузка…</p>
+          <div class="profile-stats">
+            <div class="p-stat">
+              <span class="p-val" id="pCoins">0</span>
+              <span class="p-lbl">монет</span>
+            </div>
+            <div class="p-stat">
+              <span class="p-val" id="pCards">0</span>
+              <span class="p-lbl">карточек</span>
+            </div>
+            <div class="p-stat">
+              <span class="p-val" id="pStreak">0</span>
+              <span class="p-lbl">стрик</span>
+            </div>
+            <div class="p-stat">
+              <span class="p-val" id="pRank">—</span>
+              <span class="p-lbl">место</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section-title">Коллекция по редкостям</div>
+        <div class="rarity-bars glass" id="rarityBars"></div>
+
+        <div class="section-title">Мои карточки</div>
+        <div class="chip-scroll" id="myRarityChips"></div>
+        <div class="card-grid compact" id="myCardGrid"></div>
+        <div class="load-more-wrap">
+          <button type="button" class="btn glass-btn" id="myLoadMoreBtn" hidden>Ещё</button>
+        </div>
+        <div class="empty-state" id="myEmpty" hidden>
+          <div class="empty-icon">🃏</div>
+          <p>Пока нет карточек — напишите «мряу» в боте</p>
+        </div>
+
+        <div class="section-title">Игра</div>
+        <div class="info-cards">
+          <div class="info-card glass">
+            <span class="info-ico">⏱</span>
+            <div>
+              <div class="info-title">Кулдаун</div>
+              <div class="info-val" id="infoCooldown">—</div>
+            </div>
+          </div>
+          <div class="info-card glass">
+            <span class="info-ico">✏️</span>
+            <div>
+              <div class="info-title">Смена ника</div>
+              <div class="info-val" id="infoNickCost">—</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Floating liquid-glass nav -->
+    <nav class="bottom-nav glass-float" id="bottomNav">
+      <button type="button" class="nav-item active" data-nav="collection">
+        <span class="nav-ico">🃏</span>
+        <span class="nav-lbl">Карты</span>
+      </button>
+      <button type="button" class="nav-item" data-nav="top">
+        <span class="nav-ico">🏆</span>
+        <span class="nav-lbl">Топ</span>
+      </button>
+      <button type="button" class="nav-item" data-nav="profile">
+        <span class="nav-ico">👤</span>
+        <span class="nav-lbl">Профиль</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Card detail sheet -->
+  <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+  <div class="sheet glass" id="cardSheet" hidden>
+    <div class="sheet-handle"></div>
+    <div class="sheet-photo-wrap">
+      <img id="sheetPhoto" alt="" />
+      <div class="sheet-photo-fallback" id="sheetFallback">🃏</div>
+    </div>
+    <div class="sheet-body">
+      <h3 id="sheetName">—</h3>
+      <div class="sheet-rarity" id="sheetRarity">—</div>
+      <div class="sheet-meta" id="sheetMeta"></div>
+    </div>
+    <button type="button" class="btn primary full" id="sheetClose">Закрыть</button>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <div class="boot-loader" id="bootLoader">
+    <div class="boot-spinner"></div>
+    <p>Загрузка…</p>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
