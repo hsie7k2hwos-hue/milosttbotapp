@@ -17,7 +17,7 @@
     typeof window.__API_BASE__ === "string" ? window.__API_BASE__ : "";
 
   // >>> ЗАМЕНИТЕ НА СВОЙ ПУБЛИЧНЫЙ URL API <<<
-  var FALLBACK = "https://YOUR-BOTHOST-API.example.com";
+  var FALLBACK = "https://bot-1788312110-6885-chekinikita.bothost.tech";
 
   var raw = (fromWindow || fromQuery || fromStorage || FALLBACK).replace(
     /\/$/,
