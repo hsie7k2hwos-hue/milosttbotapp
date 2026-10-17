@@ -272,7 +272,7 @@
       const data = await API.myCollection({
         rarity: state.rarityFilter,
         page: state.cardsPage,
-        limit: APP_CONFIG.PAGE_SIZE,
+        limit: (window.APP_CONFIG && APP_CONFIG.PAGE_SIZE) || 24,
       });
       let items = data.items || [];
       // клиентский поиск по имени
@@ -291,16 +291,16 @@
       const more =
         !state.search &&
         state.cards.length < state.cardsTotal &&
-        (data.items || []).length >= APP_CONFIG.PAGE_SIZE;
+        (data.items || []).length >= ((window.APP_CONFIG && APP_CONFIG.PAGE_SIZE) || 24);
       $("#loadMoreBtn").hidden = !more;
     } catch (e) {
       console.error(e);
       if (e.status === 401) {
         toast("Откройте мини-приложение из Telegram");
-        $("#collectionEmpty").querySelector("p").textContent =
-          "Нужна авторизация Telegram";
+        const ep = $("#collectionEmpty") && $("#collectionEmpty").querySelector("p");
+        if (ep) ep.textContent = "Нужна авторизация Telegram";
       } else {
-        toast("Ошибка загрузки коллекции");
+        toast(e.message || "Ошибка загрузки коллекции");
       }
       if (reset) $("#cardGrid").innerHTML = "";
       $("#collectionEmpty").hidden = false;
@@ -643,31 +643,76 @@
     $("#sheetBackdrop").addEventListener("click", closeSheets);
   }
 
-  async function boot() {
-    applyTheme();
-    initTelegram();
-    bindEvents();
-
-    try {
-      await API.health();
-    } catch (e) {
-      console.warn("API health failed", e);
-      toast("API недоступен — проверьте API_BASE");
-    }
-
-    await loadRarities();
-    await loadMyCards(true);
-
+  function hideBootLoader() {
     const loader = $("#bootLoader");
+    if (!loader) return;
     loader.classList.add("hide");
     setTimeout(() => {
       loader.hidden = true;
-    }, 400);
+      loader.style.display = "none";
+    }, 350);
+  }
+
+  async function boot() {
+    try {
+      applyTheme();
+      initTelegram();
+      bindEvents();
+    } catch (e) {
+      console.error("init error", e);
+    }
+
+    // Гарантированно убираем лоадер через 10с, даже если всё зависло
+    const failsafe = setTimeout(hideBootLoader, 10000);
+
+    try {
+      const base = API.apiBase ? API.apiBase() : "";
+      if (!base || base.includes("YOUR-BOTHOST") || base.includes("example.com")) {
+        toast("Укажите API_BASE в js/config.js");
+        $("#collectionEmpty").hidden = false;
+        const p = $("#collectionEmpty p");
+        if (p) p.textContent = "API не настроен — задайте URL бэкенда в config.js";
+        return;
+      }
+
+      try {
+        await API.health();
+      } catch (e) {
+        console.warn("API health failed", e);
+        toast(e.code === "TIMEOUT" ? "API не отвечает" : "API недоступен");
+      }
+
+      try {
+        await loadRarities();
+      } catch (e) {
+        console.warn("rarities", e);
+      }
+
+      try {
+        await loadMyCards(true);
+      } catch (e) {
+        console.error("collection", e);
+        $("#collectionEmpty").hidden = false;
+      }
+    } catch (e) {
+      console.error("boot", e);
+      toast("Ошибка запуска");
+    } finally {
+      clearTimeout(failsafe);
+      hideBootLoader();
+    }
+  }
+
+  function start() {
+    boot().catch((e) => {
+      console.error(e);
+      hideBootLoader();
+    });
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot);
+    document.addEventListener("DOMContentLoaded", start);
   } else {
-    boot();
+    start();
   }
 })();
