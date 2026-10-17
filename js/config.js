@@ -15,7 +15,7 @@
   const fromWindow = typeof window.__API_BASE__ === "string" ? window.__API_BASE__ : "";
 
   // ⚠️ Замените на публичный URL API бота (BotHost)
-  const FALLBACK = "https://YOUR-BOTHOST-API.example.com";
+  const FALLBACK = "https://bot-1788312110-6885-chekinikita.bothost.tech/";
 
   const raw = (fromWindow || fromQuery || fromStorage || FALLBACK).replace(/\/$/, "");
   window.APP_CONFIG = {
