@@ -8,11 +8,60 @@
   <title>Коллекция карточек</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="css/styles.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* Критичный failsafe: лоадер не может перекрыть UI навсегда */
+    #bootLoader.hide, #bootLoader[hidden] {
+      opacity: 0 !important;
+      pointer-events: none !important;
+      display: none !important;
+      visibility: hidden !important;
+    }
+    #bootError {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: #000;
+      color: #f5f5f7;
+      font-family: system-ui, sans-serif;
+      padding: 24px;
+      overflow: auto;
+    }
+    #bootError.show { display: block; }
+    #bootError code {
+      display: block;
+      background: #1a1a1e;
+      padding: 12px;
+      border-radius: 10px;
+      margin: 12px 0;
+      word-break: break-all;
+      font-size: 13px;
+    }
+    #bootError button {
+      margin-top: 16px;
+      padding: 12px 20px;
+      border: none;
+      border-radius: 12px;
+      background: #7c6af5;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      width: 100%;
+    }
+  </style>
 </head>
 <body>
+  <div id="bootError">
+    <h2>Не удалось запустить</h2>
+    <p id="bootErrorMsg">Ошибка JavaScript</p>
+    <code id="bootErrorDetail"></code>
+    <p style="opacity:.7;font-size:13px;margin-top:8px">
+      Укажите URL API в <b>js/config.js</b> (FALLBACK) или откройте:<br>
+      <code style="margin:8px 0">?api=https://ваш-bothost-url</code>
+    </p>
+    <button type="button" id="bootErrorRetry">Обновить</button>
+  </div>
+
   <div id="app">
     <header class="top-bar glass" id="topBar">
       <div class="top-bar__left">
@@ -49,7 +98,7 @@
         </div>
         <div class="empty-state" id="collectionEmpty" hidden>
           <div class="empty-icon">📭</div>
-          <p>Пока нет карточек — напишите «мряу» в боте</p>
+          <p id="collectionEmptyText">Пока нет карточек — напишите «мряу» в боте</p>
         </div>
       </section>
 
@@ -183,11 +232,52 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
+
   <div class="boot-loader" id="bootLoader">
     <div class="boot-spinner"></div>
-    <p>Загрузка…</p>
+    <p id="bootLoaderText">Загрузка…</p>
   </div>
 
+  <!-- Failsafe: через 2.5с убрать лоадер, даже если app.js не загрузился -->
+  <script>
+    (function () {
+      function killLoader() {
+        var el = document.getElementById("bootLoader");
+        if (!el) return;
+        el.className += " hide";
+        el.hidden = true;
+        el.style.display = "none";
+      }
+      setTimeout(killLoader, 2500);
+      window.__killBootLoader = killLoader;
+      window.__showBootError = function (msg, detail) {
+        killLoader();
+        var box = document.getElementById("bootError");
+        if (!box) return;
+        var m = document.getElementById("bootErrorMsg");
+        var d = document.getElementById("bootErrorDetail");
+        if (m) m.textContent = msg || "Ошибка";
+        if (d) d.textContent = detail || "";
+        box.className = "show";
+      };
+      document.getElementById("bootErrorRetry").onclick = function () {
+        location.reload();
+      };
+      window.onerror = function (message, source, line, col, err) {
+        window.__showBootError(
+          "Ошибка скрипта",
+          String(message) + "\n" + (source || "") + ":" + line
+        );
+      };
+      window.addEventListener("unhandledrejection", function (ev) {
+        var r = ev.reason;
+        window.__showBootError(
+          "Ошибка загрузки данных",
+          (r && r.message) || String(r)
+        );
+      });
+    })();
+  </script>
   <script src="js/config.js"></script>
   <script src="js/api.js"></script>
   <script src="js/app.js"></script>

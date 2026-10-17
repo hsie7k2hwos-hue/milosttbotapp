@@ -1,23 +1,28 @@
 /**
- * Конфигурация мини-приложения.
+ * ОБЯЗАТЕЛЬНО укажите публичный URL API бота (BotHost).
  *
- * API_BASE — публичный URL бэкенда на BotHost (без слэша в конце).
- * Задаётся:
- *   1) window.__API_BASE__ (инжект при деплое)
- *   2) meta / query ?api=
- *   3) localStorage api_base
- *   4) fallback ниже — замените на свой URL
+ * Можно так:
+ *  1) Заменить FALLBACK ниже
+ *  2) Открыть мини-приложение: https://app.vercel.app/?api=https://your-api.com
+ *  3) window.__API_BASE__ до загрузки скриптов
  */
 (function () {
-  const params = new URLSearchParams(location.search);
-  const fromQuery = params.get("api");
-  const fromStorage = localStorage.getItem("api_base");
-  const fromWindow = typeof window.__API_BASE__ === "string" ? window.__API_BASE__ : "";
+  var params = new URLSearchParams(location.search);
+  var fromQuery = params.get("api");
+  var fromStorage = null;
+  try {
+    fromStorage = localStorage.getItem("api_base");
+  } catch (_) {}
+  var fromWindow =
+    typeof window.__API_BASE__ === "string" ? window.__API_BASE__ : "";
 
-  // ⚠️ Замените на публичный URL API бота (BotHost)
-  const FALLBACK = "https://bot-1788312110-6885-chekinikita.bothost.tech";
+  // >>> ЗАМЕНИТЕ НА СВОЙ ПУБЛИЧНЫЙ URL API <<<
+  var FALLBACK = "https://YOUR-BOTHOST-API.example.com";
 
-  const raw = (fromWindow || fromQuery || fromStorage || FALLBACK).replace(/\/$/, "");
+  var raw = (fromWindow || fromQuery || fromStorage || FALLBACK).replace(
+    /\/$/,
+    ""
+  );
   window.APP_CONFIG = {
     API_BASE: raw,
     PAGE_SIZE: 24,
