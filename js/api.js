@@ -6,7 +6,6 @@
 
   function getInitData() {
     if (tg && tg.initData) return tg.initData;
-    // dev fallback
     return localStorage.getItem("dev_init_data") || "";
   }
 
@@ -66,7 +65,17 @@
       const s = q.toString();
       return request(`/api/me/collection${s ? "?" + s : ""}`);
     },
+    activity: (range = "week") =>
+      request(`/api/me/activity?range=${encodeURIComponent(range)}`),
     user: (id) => request(`/api/users/${id}`),
+    userCollection: (id, params = {}) => {
+      const q = new URLSearchParams();
+      if (params.rarity && params.rarity !== "all") q.set("rarity", params.rarity);
+      if (params.page != null) q.set("page", params.page);
+      if (params.limit != null) q.set("limit", params.limit);
+      const s = q.toString();
+      return request(`/api/users/${id}/collection${s ? "?" + s : ""}`);
+    },
     getInitData,
     tg,
   };

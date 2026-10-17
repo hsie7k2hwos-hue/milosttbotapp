@@ -14,17 +14,14 @@
     cardsTotal: 0,
     cards: [],
     loadingCards: false,
+    meCounts: null,
     topKind: "coins",
     top: [],
     me: null,
-    myRarity: "all",
-    myPage: 0,
-    myCards: [],
-    myTotal: 0,
+    activityRange: "week",
     theme: localStorage.getItem("theme") || "dark",
   };
 
-  // ── Telegram bootstrap ──────────────────────────────────────────────────
   function initTelegram() {
     const tg = API.tg;
     if (!tg) return;
@@ -37,7 +34,6 @@
       if (tg.setBackgroundColor) {
         tg.setBackgroundColor(state.theme === "dark" ? "#000000" : "#f2f2f7");
       }
-      // sync theme with Telegram if user hasn't chosen
       if (!localStorage.getItem("theme") && tg.colorScheme) {
         state.theme = tg.colorScheme === "light" ? "light" : "dark";
       }
@@ -64,7 +60,6 @@
     }
   }
 
-  // ── Utils ───────────────────────────────────────────────────────────────
   function fmt(n) {
     const x = Number(n) || 0;
     return x.toLocaleString("ru-RU").replace(/\s/g, "\u00a0");
@@ -98,9 +93,44 @@
     } catch (_) {}
   }
 
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /** Надёжная подгрузка картинки: без opacity-хака (кэш часто не стреляет onload). */
+  function bindImg(img, url, onOk, onFail) {
+    if (!img || !url) {
+      if (onFail) onFail();
+      return;
+    }
+    const done = (ok) => {
+      img.classList.toggle("is-loaded", !!ok);
+      img.classList.toggle("is-error", !ok);
+      if (ok && onOk) onOk();
+      if (!ok && onFail) onFail();
+    };
+    img.decoding = "async";
+    img.loading = "lazy";
+    img.referrerPolicy = "no-referrer";
+    // сброс перед сменой src
+    img.removeAttribute("src");
+    img.onload = () => done(true);
+    img.onerror = () => done(false);
+    // cache bust только если уже был error на этом url
+    img.src = url;
+    // если уже в кэше и complete
+    if (img.complete && img.naturalWidth > 0) {
+      done(true);
+    }
+  }
+
   // ── Navigation ──────────────────────────────────────────────────────────
   const PAGE_META = {
-    collection: { title: "Коллекция", sub: "Все карточки" },
+    collection: { title: "Мои карты", sub: "Коллекция" },
     top: { title: "Топ игроков", sub: "Рейтинг" },
     profile: { title: "Профиль", sub: "Ваша статистика" },
   };
@@ -117,29 +147,30 @@
     $("#pageSubtitle").textContent = meta.sub;
     haptic("select");
 
-    if (page === "collection" && !state.cards.length) loadCards(true);
+    if (page === "collection") loadMyCards(true);
     if (page === "top") loadTop();
     if (page === "profile") loadProfile();
   }
 
-  // ── Collection ──────────────────────────────────────────────────────────
-  function renderRarityChips(container, active, onClick, includeAll = true, countsMap = null) {
+  // ── Chips ───────────────────────────────────────────────────────────────
+  function renderRarityChips(container, active, onClick, countsMap) {
     const el = $(container);
     if (!el) return;
     const parts = [];
-    if (includeAll) {
-      const total =
-        countsMap && countsMap._total != null
-          ? countsMap._total
-          : state.rarities.reduce((s, r) => s + (r.count || 0), 0);
-      parts.push(
-        `<button type="button" class="chip${active === "all" ? " active" : ""}" data-r="all">📦 Все<span class="cnt">${fmt(total)}</span></button>`
-      );
-    }
+    const total =
+      countsMap && countsMap._total != null
+        ? countsMap._total
+        : (countsMap
+            ? Object.keys(countsMap)
+                .filter((k) => k !== "_total")
+                .reduce((s, k) => s + (countsMap[k] || 0), 0)
+            : 0);
+    parts.push(
+      `<button type="button" class="chip${active === "all" ? " active" : ""}" data-r="all">📦 Все<span class="cnt">${fmt(total)}</span></button>`
+    );
     state.rarities.forEach((r) => {
-      const cnt =
-        countsMap && countsMap[r.key] != null ? countsMap[r.key] : r.count || 0;
-      if (!includeAll && cnt === 0) return;
+      const cnt = countsMap && countsMap[r.key] != null ? countsMap[r.key] : 0;
+      if (countsMap && cnt === 0) return;
       parts.push(
         `<button type="button" class="chip r-${r.key}${active === r.key ? " active" : ""}" data-r="${r.key}">${r.icon} ${r.name}<span class="cnt">${fmt(cnt)}</span></button>`
       );
@@ -152,52 +183,76 @@
     };
   }
 
-  function cardTileHtml(c, compact = false) {
+  function cardTileHtml(c) {
     const reward =
       c.reward < 0
         ? `−${fmt(Math.abs(c.reward))} 🪙`
         : `+${fmt(c.reward)} 🪙`;
-    const sub = c.owners != null ? `${fmt(c.owners)} вл. · ${reward}` : reward;
+    const photoAttr =
+      c.has_photo && c.photo_url
+        ? `data-photo="${escapeHtml(c.photo_url)}"`
+        : "";
     return `
-      <article class="card-tile r-${c.rarity}" data-id="${c.id}" role="button" tabindex="0">
+      <article class="card-tile r-${c.rarity}" data-id="${c.id}" ${photoAttr} role="button" tabindex="0">
         <div class="card-tile__fallback">${c.rarity_icon || "🃏"}</div>
-        ${
-          c.has_photo
-            ? `<img class="card-tile__img" src="${c.photo_url}" alt="" loading="lazy" onload="this.style.opacity=1" onerror="this.remove()" style="opacity:0;transition:opacity .3s" />`
-            : ""
-        }
-        <span class="card-tile__badge">${c.rarity_icon || ""} ${c.rarity_name || c.rarity}</span>
+        <img class="card-tile__img" alt="" decoding="async" draggable="false" />
+        <span class="card-tile__badge">${c.rarity_icon || ""} ${escapeHtml(c.rarity_name || c.rarity)}</span>
         <div class="card-tile__foot">
           <div class="card-tile__name">${escapeHtml(c.name)}</div>
-          ${compact ? "" : `<div class="card-tile__sub">${sub}</div>`}
+          <div class="card-tile__sub">${reward}</div>
         </div>
       </article>`;
   }
 
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+  function hydrateCardImages(root) {
+    const scope = root || document;
+    $$(".card-tile[data-photo]", scope).forEach((tile) => {
+      const url = tile.getAttribute("data-photo");
+      const img = tile.querySelector(".card-tile__img");
+      const fallback = tile.querySelector(".card-tile__fallback");
+      if (!img || !url) return;
+      bindImg(
+        img,
+        url,
+        () => {
+          if (fallback) fallback.style.opacity = "0";
+        },
+        () => {
+          img.style.display = "none";
+          if (fallback) fallback.style.opacity = "1";
+        }
+      );
+    });
+  }
+
+  // ── My collection (main) ────────────────────────────────────────────────
+  async function ensureMeCounts() {
+    if (state.meCounts) return state.meCounts;
+    try {
+      const me = await API.me();
+      state.me = me;
+      const map = { _total: me.cards_count || 0 };
+      (me.rarities || []).forEach((r) => {
+        map[r.key] = r.owned || 0;
+      });
+      state.meCounts = map;
+      return map;
+    } catch (e) {
+      console.error(e);
+      return { _total: 0 };
+    }
   }
 
   async function loadRarities() {
     try {
       const data = await API.rarities();
       state.rarities = data.items || [];
-      renderRarityChips("#rarityChips", state.rarityFilter, (r) => {
-        state.rarityFilter = r;
-        renderRarityChips("#rarityChips", state.rarityFilter, arguments.callee);
-        loadCards(true);
-      });
     } catch (e) {
       console.error(e);
-      toast("Не удалось загрузить редкости");
     }
   }
 
-  async function loadCards(reset = false) {
+  async function loadMyCards(reset = false) {
     if (state.loadingCards) return;
     state.loadingCards = true;
     if (reset) {
@@ -208,26 +263,45 @@
         .join("");
     }
     try {
-      const data = await API.cards({
+      const counts = await ensureMeCounts();
+      renderRarityChips("#rarityChips", state.rarityFilter, (r) => {
+        state.rarityFilter = r;
+        loadMyCards(true);
+      }, counts);
+
+      const data = await API.myCollection({
         rarity: state.rarityFilter,
         page: state.cardsPage,
         limit: APP_CONFIG.PAGE_SIZE,
-        q: state.search || undefined,
       });
-      const items = data.items || [];
+      let items = data.items || [];
+      // клиентский поиск по имени
+      if (state.search) {
+        const q = state.search.toLowerCase();
+        items = items.filter((c) => (c.name || "").toLowerCase().includes(q));
+      }
       if (reset) state.cards = items;
       else state.cards = state.cards.concat(items);
       state.cardsTotal = data.total || 0;
       $("#statTotal").textContent = fmt(state.cardsTotal);
       $("#statShown").textContent = fmt(state.cards.length);
       $("#cardGrid").innerHTML = state.cards.map((c) => cardTileHtml(c)).join("");
+      hydrateCardImages($("#cardGrid"));
       $("#collectionEmpty").hidden = state.cards.length > 0;
       const more =
-        state.cards.length < state.cardsTotal && items.length >= APP_CONFIG.PAGE_SIZE;
+        !state.search &&
+        state.cards.length < state.cardsTotal &&
+        (data.items || []).length >= APP_CONFIG.PAGE_SIZE;
       $("#loadMoreBtn").hidden = !more;
     } catch (e) {
       console.error(e);
-      toast("Ошибка загрузки карточек");
+      if (e.status === 401) {
+        toast("Откройте мини-приложение из Telegram");
+        $("#collectionEmpty").querySelector("p").textContent =
+          "Нужна авторизация Telegram";
+      } else {
+        toast("Ошибка загрузки коллекции");
+      }
       if (reset) $("#cardGrid").innerHTML = "";
       $("#collectionEmpty").hidden = false;
     } finally {
@@ -241,7 +315,7 @@
     list.innerHTML = Array.from({ length: 5 })
       .map(
         () =>
-          `<div class="skeleton" style="height:56px;border-radius:14px"></div>`
+          `<div class="skeleton" style="height:64px;border-radius:14px"></div>`
       )
       .join("");
     try {
@@ -256,17 +330,34 @@
       }
       $("#topEmpty").hidden = true;
       list.innerHTML = state.top
-        .map(
-          (r) => `
-        <div class="top-row">
-          <div class="top-rank">${r.rank <= 3 ? ["🥇", "🥈", "🥉"][r.rank - 1] : r.rank}</div>
+        .map((r) => {
+          const medal =
+            r.rank <= 3 ? ["🥇", "🥈", "🥉"][r.rank - 1] : String(r.rank);
+          const av = r.avatar_url
+            ? `<img class="top-avatar-img" data-src="${escapeHtml(r.avatar_url)}" alt="" />`
+            : `<span class="top-avatar-ph">👤</span>`;
+          return `
+        <button type="button" class="top-row" data-user="${r.user_id}">
+          <div class="top-rank">${medal}</div>
+          <div class="top-avatar">${av}</div>
           <div class="top-info">
             <div class="top-name">${escapeHtml(r.name)}</div>
           </div>
           <div class="top-value">${fmt(r.value)} ${unit}</div>
-        </div>`
-        )
+        </button>`;
+        })
         .join("");
+
+      // load avatars
+      $$(".top-avatar-img", list).forEach((img) => {
+        const src = img.getAttribute("data-src");
+        bindImg(img, src, null, () => {
+          img.replaceWith(Object.assign(document.createElement("span"), {
+            className: "top-avatar-ph",
+            textContent: "👤",
+          }));
+        });
+      });
     } catch (e) {
       console.error(e);
       toast("Ошибка топа");
@@ -275,11 +366,107 @@
     }
   }
 
+  // ── User profile sheet ──────────────────────────────────────────────────
+  async function openUserProfile(userId) {
+    haptic("impact");
+    const sheet = $("#userSheet");
+    const backdrop = $("#sheetBackdrop");
+    sheet.hidden = false;
+    backdrop.hidden = false;
+    $("#userSheetName").textContent = "…";
+    $("#userSheetMeta").textContent = "";
+    $("#userCardGrid").innerHTML = "";
+    $("#userRarityBars").innerHTML = "";
+
+    try {
+      const u = await API.user(userId);
+      $("#userSheetName").textContent = u.name || "Игрок";
+      $("#userSheetMeta").textContent = `ID ${u.user_id} · место #${u.rank_coins}`;
+      $("#uCoins").textContent = fmt(u.coins);
+      $("#uCards").textContent = `${fmt(u.cards_count)}/${fmt(u.total_cards)}`;
+      $("#uStreak").textContent = fmt(u.streak);
+      $("#uRank").textContent = `#${fmt(u.rank_coins)}`;
+
+      const av = $("#userSheetAvatar");
+      if (u.avatar_url) {
+        av.innerHTML = `<img alt="" />`;
+        bindImg(av.querySelector("img"), u.avatar_url, null, () => {
+          av.textContent = "👤";
+        });
+      } else {
+        av.textContent = "👤";
+      }
+
+      const maxOwned = Math.max(
+        1,
+        ...(u.rarities || []).map((r) => r.owned || 0)
+      );
+      $("#userRarityBars").innerHTML = (u.rarities || [])
+        .map((r) => {
+          const pct = Math.round(((r.owned || 0) / maxOwned) * 100);
+          return `
+          <div class="rarity-bar-row r-${r.key}">
+            <span class="ico">${r.icon}</span>
+            <div class="rarity-bar-track"><div class="rarity-bar-fill" style="width:${pct}%"></div></div>
+            <span class="rarity-bar-num">${fmt(r.owned)}</span>
+          </div>`;
+        })
+        .join("");
+
+      const col = await API.userCollection(userId, { page: 0, limit: 12 });
+      const items = col.items || [];
+      $("#userCardGrid").innerHTML = items.map((c) => cardTileHtml(c)).join("");
+      hydrateCardImages($("#userCardGrid"));
+    } catch (e) {
+      console.error(e);
+      toast("Не удалось открыть профиль");
+      closeSheets();
+    }
+  }
+
   // ── Profile ─────────────────────────────────────────────────────────────
+  function renderChart(points) {
+    const el = $("#chartBars");
+    if (!points || !points.length) {
+      el.innerHTML = `<div class="chart-empty">Нет данных</div>`;
+      return;
+    }
+    const max = Math.max(1, ...points.map((p) => p.count));
+    const showLabels = points.length <= 14;
+    el.innerHTML = points
+      .map((p) => {
+        const h = Math.max(4, Math.round((p.count / max) * 100));
+        const label = p.date.slice(5); // MM-DD
+        return `<div class="chart-col" title="${p.date}: ${p.count}">
+          <div class="chart-bar" style="height:${h}%"></div>
+          ${showLabels ? `<span class="chart-lbl">${label}</span>` : ""}
+        </div>`;
+      })
+      .join("");
+  }
+
+  async function loadActivity() {
+    try {
+      const data = await API.activity(state.activityRange);
+      renderChart(data.points || []);
+      $("#chartTotal").textContent = fmt(data.total || 0);
+    } catch (e) {
+      console.error(e);
+      $("#chartBars").innerHTML = `<div class="chart-empty">Нет данных</div>`;
+      $("#chartTotal").textContent = "0";
+    }
+  }
+
   async function loadProfile() {
     try {
       const me = await API.me();
       state.me = me;
+      const map = { _total: me.cards_count || 0 };
+      (me.rarities || []).forEach((r) => {
+        map[r.key] = r.owned || 0;
+      });
+      state.meCounts = map;
+
       $("#profileName").textContent = me.name || "Игрок";
       $("#profileMeta").textContent = me.username
         ? `@${me.username} · #${me.rank_coins}`
@@ -289,16 +476,18 @@
       $("#pStreak").textContent = fmt(me.streak);
       $("#pRank").textContent = `#${fmt(me.rank_coins)}`;
       $("#infoCooldown").textContent = fmtTime(me.cooldown_left);
-      $("#infoNickCost").textContent = "150 🪙";
 
       const av = $("#profileAvatar");
-      if (me.photo_url) {
-        av.innerHTML = `<img src="${me.photo_url}" alt="" />`;
+      const avUrl = me.photo_url || me.avatar_url;
+      if (avUrl) {
+        av.innerHTML = `<img alt="" />`;
+        bindImg(av.querySelector("img"), avUrl, null, () => {
+          av.textContent = "👤";
+        });
       } else {
         av.textContent = "👤";
       }
 
-      // rarity bars
       const maxOwned = Math.max(
         1,
         ...(me.rarities || []).map((r) => r.owned || 0)
@@ -315,31 +504,16 @@
         })
         .join("");
 
-      const countsMap = { _total: me.cards_count };
-      (me.rarities || []).forEach((r) => {
-        countsMap[r.key] = r.owned;
-      });
-      renderRarityChips(
-        "#myRarityChips",
-        state.myRarity,
-        (r) => {
-          state.myRarity = r;
-          renderRarityChips("#myRarityChips", state.myRarity, arguments.callee, true, countsMap);
-          loadMyCards(true);
-        },
-        true,
-        countsMap
-      );
-
-      loadMyCards(true);
-
-      // global stats for nick cost / cooldown label refresh
       try {
         const st = await API.stats();
         if (st.nickname_cost != null) {
           $("#infoNickCost").textContent = `${fmt(st.nickname_cost)} 🪙`;
         }
-      } catch (_) {}
+      } catch (_) {
+        $("#infoNickCost").textContent = "150 🪙";
+      }
+
+      await loadActivity();
     } catch (e) {
       console.error(e);
       if (e.status === 401) {
@@ -352,40 +526,6 @@
     }
   }
 
-  async function loadMyCards(reset = false) {
-    if (!state.me) return;
-    if (reset) {
-      state.myPage = 0;
-      state.myCards = [];
-      $("#myCardGrid").innerHTML = Array.from({ length: 6 })
-        .map(() => `<div class="skeleton" style="aspect-ratio:2/3"></div>`)
-        .join("");
-    }
-    try {
-      const data = await API.myCollection({
-        rarity: state.myRarity,
-        page: state.myPage,
-        limit: APP_CONFIG.MY_PAGE_SIZE,
-      });
-      const items = data.items || [];
-      if (reset) state.myCards = items;
-      else state.myCards = state.myCards.concat(items);
-      state.myTotal = data.total || 0;
-      $("#myCardGrid").innerHTML = state.myCards
-        .map((c) => cardTileHtml(c, true))
-        .join("");
-      $("#myEmpty").hidden = state.myCards.length > 0;
-      const more =
-        state.myCards.length < state.myTotal &&
-        items.length >= APP_CONFIG.MY_PAGE_SIZE;
-      $("#myLoadMoreBtn").hidden = !more;
-    } catch (e) {
-      console.error(e);
-      if (reset) $("#myCardGrid").innerHTML = "";
-      $("#myEmpty").hidden = false;
-    }
-  }
-
   // ── Card sheet ──────────────────────────────────────────────────────────
   async function openCard(id) {
     haptic("impact");
@@ -393,7 +533,7 @@
     const backdrop = $("#sheetBackdrop");
     const img = $("#sheetPhoto");
     const fallback = $("#sheetFallback");
-    img.classList.remove("loaded");
+    img.classList.remove("is-loaded");
     img.removeAttribute("src");
     fallback.style.display = "grid";
     $("#sheetName").textContent = "…";
@@ -401,6 +541,7 @@
     $("#sheetMeta").textContent = "";
     sheet.hidden = false;
     backdrop.hidden = false;
+    $("#userSheet").hidden = true;
 
     try {
       const c = await API.card(id);
@@ -414,26 +555,28 @@
         ${reward}<br>
         Владельцев: <b>${fmt(c.owners)}</b><br>
         ID: <code>${c.id}</code>`;
-      if (c.has_photo && c.photo_url) {
-        img.onload = () => {
-          img.classList.add("loaded");
-          fallback.style.display = "none";
-        };
-        img.onerror = () => {
-          img.classList.remove("loaded");
-          fallback.style.display = "grid";
-        };
-        img.src = c.photo_url;
-      }
       fallback.textContent = c.rarity_icon || "🃏";
+      if (c.has_photo && c.photo_url) {
+        bindImg(
+          img,
+          c.photo_url,
+          () => {
+            fallback.style.display = "none";
+          },
+          () => {
+            fallback.style.display = "grid";
+          }
+        );
+      }
     } catch (e) {
       toast("Не удалось открыть карточку");
-      closeSheet();
+      closeSheets();
     }
   }
 
-  function closeSheet() {
+  function closeSheets() {
     $("#cardSheet").hidden = true;
+    $("#userSheet").hidden = true;
     $("#sheetBackdrop").hidden = true;
   }
 
@@ -454,16 +597,12 @@
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => {
         state.search = e.target.value.trim();
-        loadCards(true);
+        loadMyCards(true);
       }, 320);
     });
 
     $("#loadMoreBtn").addEventListener("click", () => {
       state.cardsPage += 1;
-      loadCards(false);
-    });
-    $("#myLoadMoreBtn").addEventListener("click", () => {
-      state.myPage += 1;
       loadMyCards(false);
     });
 
@@ -477,22 +616,38 @@
       });
     });
 
-    document.addEventListener("click", (e) => {
-      const tile = e.target.closest(".card-tile");
-      if (tile && tile.dataset.id) openCard(Number(tile.dataset.id));
+    $$("#activityRangeTabs .seg").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        $$("#activityRangeTabs .seg").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.activityRange = btn.dataset.range;
+        loadActivity();
+        haptic("select");
+      });
     });
 
-    $("#sheetClose").addEventListener("click", closeSheet);
-    $("#sheetBackdrop").addEventListener("click", closeSheet);
+    document.addEventListener("click", (e) => {
+      const tile = e.target.closest(".card-tile");
+      if (tile && tile.dataset.id) {
+        openCard(Number(tile.dataset.id));
+        return;
+      }
+      const row = e.target.closest(".top-row[data-user]");
+      if (row) {
+        openUserProfile(Number(row.dataset.user));
+      }
+    });
+
+    $("#sheetClose").addEventListener("click", closeSheets);
+    $("#userSheetClose").addEventListener("click", closeSheets);
+    $("#sheetBackdrop").addEventListener("click", closeSheets);
   }
 
-  // ── Boot ────────────────────────────────────────────────────────────────
   async function boot() {
     applyTheme();
     initTelegram();
     bindEvents();
 
-    // health check
     try {
       await API.health();
     } catch (e) {
@@ -501,7 +656,7 @@
     }
 
     await loadRarities();
-    await loadCards(true);
+    await loadMyCards(true);
 
     const loader = $("#bootLoader");
     loader.classList.add("hide");

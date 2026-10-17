@@ -14,13 +14,12 @@
 </head>
 <body>
   <div id="app">
-    <!-- Header glass -->
     <header class="top-bar glass" id="topBar">
       <div class="top-bar__left">
         <span class="logo-mark">🃏</span>
         <div class="top-bar__titles">
-          <h1 id="pageTitle">Коллекция</h1>
-          <p id="pageSubtitle" class="muted">Все карточки</p>
+          <h1 id="pageTitle">Мои карты</h1>
+          <p id="pageSubtitle" class="muted">Коллекция</p>
         </div>
       </div>
       <div class="top-bar__right">
@@ -32,17 +31,16 @@
     </header>
 
     <main id="main">
-      <!-- ── COLLECTION ── -->
       <section class="page active" id="page-collection" data-page="collection">
         <div class="filters-row">
           <div class="chip-scroll" id="rarityChips"></div>
           <div class="search-wrap glass">
             <span class="search-icon">🔍</span>
-            <input type="search" id="searchInput" placeholder="Поиск карточки…" autocomplete="off" />
+            <input type="search" id="searchInput" placeholder="Поиск в коллекции…" autocomplete="off" />
           </div>
         </div>
         <div class="stats-strip glass" id="collectionStats">
-          <div class="stat"><span class="stat-val" id="statTotal">—</span><span class="stat-lbl">всего</span></div>
+          <div class="stat"><span class="stat-val" id="statTotal">—</span><span class="stat-lbl">собрано</span></div>
           <div class="stat"><span class="stat-val" id="statShown">—</span><span class="stat-lbl">на экране</span></div>
         </div>
         <div class="card-grid" id="cardGrid"></div>
@@ -51,11 +49,10 @@
         </div>
         <div class="empty-state" id="collectionEmpty" hidden>
           <div class="empty-icon">📭</div>
-          <p>Карточек не найдено</p>
+          <p>Пока нет карточек — напишите «мряу» в боте</p>
         </div>
       </section>
 
-      <!-- ── TOP ── -->
       <section class="page" id="page-top" data-page="top">
         <div class="segmented glass" id="topKindTabs">
           <button type="button" class="seg active" data-kind="coins">🪙 Монеты</button>
@@ -69,7 +66,6 @@
         </div>
       </section>
 
-      <!-- ── PROFILE ── -->
       <section class="page" id="page-profile" data-page="profile">
         <div class="profile-hero glass" id="profileHero">
           <div class="avatar-ring">
@@ -97,19 +93,21 @@
           </div>
         </div>
 
+        <div class="section-title">Получения карточек</div>
+        <div class="segmented glass compact" id="activityRangeTabs">
+          <button type="button" class="seg active" data-range="week">Неделя</button>
+          <button type="button" class="seg" data-range="month">Месяц</button>
+          <button type="button" class="seg" data-range="all">Всё время</button>
+        </div>
+        <div class="chart-card glass" id="activityChart">
+          <div class="chart-bars" id="chartBars"></div>
+          <div class="chart-summary">
+            <span id="chartTotal">0</span> за период
+          </div>
+        </div>
+
         <div class="section-title">Коллекция по редкостям</div>
         <div class="rarity-bars glass" id="rarityBars"></div>
-
-        <div class="section-title">Мои карточки</div>
-        <div class="chip-scroll" id="myRarityChips"></div>
-        <div class="card-grid compact" id="myCardGrid"></div>
-        <div class="load-more-wrap">
-          <button type="button" class="btn glass-btn" id="myLoadMoreBtn" hidden>Ещё</button>
-        </div>
-        <div class="empty-state" id="myEmpty" hidden>
-          <div class="empty-icon">🃏</div>
-          <p>Пока нет карточек — напишите «мряу» в боте</p>
-        </div>
 
         <div class="section-title">Игра</div>
         <div class="info-cards">
@@ -131,7 +129,6 @@
       </section>
     </main>
 
-    <!-- Floating liquid-glass nav -->
     <nav class="bottom-nav glass-float" id="bottomNav">
       <button type="button" class="nav-item active" data-nav="collection">
         <span class="nav-ico">🃏</span>
@@ -148,12 +145,11 @@
     </nav>
   </div>
 
-  <!-- Card detail sheet -->
   <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
   <div class="sheet glass" id="cardSheet" hidden>
     <div class="sheet-handle"></div>
     <div class="sheet-photo-wrap">
-      <img id="sheetPhoto" alt="" />
+      <img id="sheetPhoto" alt="" decoding="async" />
       <div class="sheet-photo-fallback" id="sheetFallback">🃏</div>
     </div>
     <div class="sheet-body">
@@ -162,6 +158,28 @@
       <div class="sheet-meta" id="sheetMeta"></div>
     </div>
     <button type="button" class="btn primary full" id="sheetClose">Закрыть</button>
+  </div>
+
+  <div class="sheet glass" id="userSheet" hidden>
+    <div class="sheet-handle"></div>
+    <div class="user-sheet-hero">
+      <div class="avatar-ring sm">
+        <div class="avatar" id="userSheetAvatar">👤</div>
+      </div>
+      <h3 id="userSheetName">—</h3>
+      <p class="muted" id="userSheetMeta"></p>
+      <div class="profile-stats">
+        <div class="p-stat"><span class="p-val" id="uCoins">0</span><span class="p-lbl">монет</span></div>
+        <div class="p-stat"><span class="p-val" id="uCards">0</span><span class="p-lbl">карт</span></div>
+        <div class="p-stat"><span class="p-val" id="uStreak">0</span><span class="p-lbl">стрик</span></div>
+        <div class="p-stat"><span class="p-val" id="uRank">—</span><span class="p-lbl">место</span></div>
+      </div>
+    </div>
+    <div class="section-title">Редкости</div>
+    <div class="rarity-bars glass" id="userRarityBars"></div>
+    <div class="section-title">Карточки</div>
+    <div class="card-grid compact" id="userCardGrid"></div>
+    <button type="button" class="btn primary full" id="userSheetClose" style="margin-top:16px">Закрыть</button>
   </div>
 
   <div class="toast" id="toast" hidden></div>
